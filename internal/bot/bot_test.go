@@ -42,7 +42,7 @@ func private(text string) *models.Message {
 	}
 }
 
-func noTyping() {}
+func noTyping() func() { return func() {} }
 
 func TestProcessRepliesAndKeepsHistory(t *testing.T) {
 	b, llm, db := newBot(t, Config{})

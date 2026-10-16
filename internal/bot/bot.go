@@ -67,8 +67,22 @@ func (b *Bot) Handle(ctx context.Context, tg *tgbot.Bot, upd *models.Update) {
 	if msg == nil || msg.From == nil || msg.From.IsBot {
 		return
 	}
-	typing := func() {
-		tg.SendChatAction(ctx, &tgbot.SendChatActionParams{ChatID: msg.Chat.ID, Action: models.ChatActionTyping})
+	// Telegram shows «печатает…» for ~5 s, while the agent may think longer.
+	typing := func() (stop func()) {
+		ctx, cancel := context.WithCancel(ctx)
+		go func() {
+			tick := time.NewTicker(4 * time.Second)
+			defer tick.Stop()
+			for {
+				tg.SendChatAction(ctx, &tgbot.SendChatActionParams{ChatID: msg.Chat.ID, Action: models.ChatActionTyping})
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
+		return cancel
 	}
 	reply := b.Process(ctx, upd.ID, msg, typing)
 	if reply == "" {
@@ -81,7 +95,8 @@ func (b *Bot) Handle(ctx context.Context, tg *tgbot.Bot, upd *models.Update) {
 
 // Process turns one incoming message into a reply; "" means stay silent.
 // It does not depend on how the update arrived (long polling or webhook).
-func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, typing func()) string {
+// typing starts a «печатает…» indicator and returns a func that stops it.
+func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, typing func() (stop func())) string {
 	if msg.Chat.Type != models.ChatTypePrivate {
 		return privateOnly
 	}
@@ -134,10 +149,11 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 		return b.fail("load history", user.ID, err)
 	}
 
-	typing()
+	stopTyping := typing()
 	actx, cancel := context.WithTimeout(ctx, b.cfg.ReplyTimeout)
 	defer cancel()
 	reply, err := b.agent.Reply(actx, b.db.ForUser(user), history, text)
+	stopTyping()
 	if err != nil {
 		return b.fail("agent", user.ID, err)
 	}
