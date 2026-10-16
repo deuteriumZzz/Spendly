@@ -53,6 +53,9 @@ services:
       - gocache:/root/.cache/go-build
     environment:
       TEST_DATABASE_URL: postgres://spendly:spendly@postgres:5432/spendly_test?sslmode=disable
+    env_file: # LLM_* for make eval
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
