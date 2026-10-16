@@ -1,3 +1,4 @@
-.git
-.env
+# The build needs only Go sources, migrations and web/; skip dotfiles, docs and secrets.
+.*
 docs
+*.md

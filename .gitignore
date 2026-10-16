@@ -1,2 +1,12 @@
+# secrets
 .env
+
+# build and test output
 /spendly
+*.test
+coverage.out
+
+# editors and OS
+.idea/
+.vscode/
+.DS_Store
