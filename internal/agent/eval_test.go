@@ -134,6 +134,18 @@ var evalCases = []evalCase{
 	{group: "прочее", msg: "какая сегодня погода?", check: unchanged()},
 	{group: "прочее", msg: "кофе", check: all(unchanged(), asks())},
 	{group: "прочее", msg: "кофе 350 завтра", check: unchanged()},
+
+	// Опечатки и сленг: пишут с телефона на ходу
+	{group: "опечатки", msg: "кофэ 350", check: all(
+		added(want{35000, cats("еда"), evalToday}), newComment("кофе"))},
+	{group: "опечатки", msg: "прадукты 2000", check: all(
+		added(want{200000, cats("еда"), evalToday}), newComment("продукты"))},
+	{group: "опечатки", msg: "шаверма 250", check: added(want{25000, cats("еда"), evalToday})},
+	{group: "опечатки", msg: "таксы до работы 900", check: added(want{90000, cats("транспорт"), evalToday})},
+	{group: "опечатки", msg: "лекарсвта 1,2к", check: added(want{120000, cats("здоровье"), evalToday})},
+	{group: "опечатки", msg: "удали кофэ", check: deleted("кофе", "2026-10-16")},
+	{group: "опечатки", msg: "сколко потратил на иду в этом месяце", check: all(
+		called("sum_expenses", argIs("category", "еда"), argIs("from", "2026-10-01")), replyHas("3190"))},
 }
 
 type evalResult struct {
@@ -278,6 +290,20 @@ func added(ws ...want) check {
 			rows = slices.Delete(rows, i, i+1)
 		}
 		return othersIntact(r, 0)
+	}
+}
+
+// newComment: a new expense was saved with this comment — typos normalized,
+// so «удали кофе» finds it later.
+func newComment(want string) check {
+	return func(r *evalRun) error {
+		rows := newRows(r)
+		for _, e := range rows {
+			if strings.EqualFold(strings.TrimSpace(e.Comment), want) {
+				return nil
+			}
+		}
+		return fmt.Errorf("нет новой траты с комментарием %q: %s", want, formatRows(rows))
 	}
 }
 
