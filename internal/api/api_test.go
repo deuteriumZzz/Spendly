@@ -64,6 +64,9 @@ func TestExpensesCRUD(t *testing.T) {
 	if code != http.StatusOK || summary["count"] != 1.0 || summary["total"] != 450.0 {
 		t.Errorf("list: %d %v", code, list)
 	}
+	if byUser, _ := list["by_user"].([]any); len(byUser) != 1 || byUser[0].(map[string]any)["name"] != "Алиса" {
+		t.Errorf("by_user = %v", list["by_user"])
+	}
 	if code, _ := do("GET", "/api/expenses?from=yesterday", ""); code != http.StatusBadRequest {
 		t.Errorf("bad filter date: %d, want 400", code)
 	}

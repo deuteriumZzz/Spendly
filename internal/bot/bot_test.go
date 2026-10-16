@@ -44,7 +44,8 @@ func newBot(t *testing.T, cfg Config) (*Bot, *echoLLM, *expense.DB) {
 }
 
 func newBotWith(t *testing.T, cfg Config, llm agent.LLM) (*Bot, *expense.DB) {
-	db := expense.NewDB(testdb.New(t))
+	pool := testdb.New(t)
+	db := expense.NewDB(pool)
 	cfg.FamilyID = expense.DefaultFamilyID
 	cfg.MaxConcurrency = 2
 	cfg.HistorySize = 10
@@ -52,7 +53,7 @@ func newBotWith(t *testing.T, cfg Config, llm agent.LLM) (*Bot, *expense.DB) {
 	if cfg.RatePerHour == 0 {
 		cfg.RatePerHour = 60
 	}
-	return New(db, agent.New(llm, time.UTC), cfg), db
+	return New(db, NewDialogs(pool), agent.New(llm, time.UTC), cfg), db
 }
 
 func private(text string) *models.Message {
@@ -77,7 +78,7 @@ func TestProcessRepliesAndKeepsHistory(t *testing.T) {
 	if err != nil || user.Name != "Алиса" {
 		t.Fatalf("open mode did not add the user: %+v, %v", user, err)
 	}
-	hist, _ := db.History(ctx, 101, 1<<62, 10)
+	hist, _ := b.dialogs.History(ctx, 101, 1<<62, 10)
 	if len(hist) != 4 || hist[1].Content != "ответ на: кофе 350" {
 		t.Errorf("history = %+v", hist)
 	}
@@ -145,14 +146,14 @@ func TestProcessRateLimit(t *testing.T) {
 }
 
 func TestProcessReportsChangesWhenAgentFails(t *testing.T) {
-	b, db := newBotWith(t, Config{}, &flakyLLM{})
+	b, _ := newBotWith(t, Config{}, &flakyLLM{})
 	ctx := context.Background()
 	got := b.Process(ctx, 1, private("кофе 350"), noTyping)
 	if !strings.Contains(got, "Сделано") || !strings.Contains(got, "кофе") {
 		t.Fatalf("reply = %q, want the recorded expense listed", got)
 	}
 	// The partial reply is in the history, so the next turn knows the expense exists.
-	hist, _ := db.History(ctx, 101, 1<<62, 10)
+	hist, _ := b.dialogs.History(ctx, 101, 1<<62, 10)
 	if len(hist) != 2 || hist[1].Role != "assistant" || !strings.Contains(hist[1].Content, "кофе") {
 		t.Errorf("history = %+v", hist)
 	}

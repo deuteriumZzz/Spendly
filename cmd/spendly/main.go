@@ -84,6 +84,7 @@ func serve(ctx context.Context) error {
 	}
 	defer pool.Close()
 	db := expense.NewDB(pool)
+	dialogs := bot.NewDialogs(pool)
 
 	for id, name := range cfg.Members {
 		if err := db.SaveMember(ctx, id, expense.DefaultFamilyID, name); err != nil {
@@ -96,7 +97,7 @@ func serve(ctx context.Context) error {
 		}
 	}
 
-	go pruneMessages(ctx, db)
+	go pruneMessages(ctx, dialogs)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -118,7 +119,7 @@ func serve(ctx context.Context) error {
 			BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, Model: cfg.LLMModel,
 			HTTP: &http.Client{Timeout: 60 * time.Second},
 		}
-		b := bot.New(db, agent.New(llm, cfg.Location), bot.Config{
+		b := bot.New(db, dialogs, agent.New(llm, cfg.Location), bot.Config{
 			FamilyID:       expense.DefaultFamilyID,
 			Members:        cfg.Members,
 			RatePerHour:    cfg.RatePerHour,
@@ -153,11 +154,11 @@ func serve(ctx context.Context) error {
 const messageRetention = 7 * 24 * time.Hour
 
 // pruneMessages runs hourly; with several replicas each one prunes, which is harmless.
-func pruneMessages(ctx context.Context, db *expense.DB) {
+func pruneMessages(ctx context.Context, dialogs *bot.Dialogs) {
 	tick := time.NewTicker(time.Hour)
 	defer tick.Stop()
 	for {
-		n, err := db.PruneMessages(ctx, time.Now().Add(-messageRetention))
+		n, err := dialogs.Prune(ctx, time.Now().Add(-messageRetention))
 		if err != nil && ctx.Err() == nil {
 			slog.Error("prune messages", "err", err)
 		} else if n > 0 {

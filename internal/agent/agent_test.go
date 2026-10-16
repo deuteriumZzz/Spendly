@@ -205,7 +205,7 @@ func TestFailureAfterChangeReportsIt(t *testing.T) {
 func TestHistoryIsSentBeforeMessage(t *testing.T) {
 	f := setup(t)
 	llm := &fakeLLM{t: t, replies: []Message{say("ok")}}
-	history := []expense.Message{{Role: "user", Content: "удали такси"}, {Role: "assistant", Content: "Какое?"}}
+	history := []Message{{Role: "user", Content: "удали такси"}, {Role: "assistant", Content: "Какое?"}}
 	if _, err := newAgent(llm).Reply(context.Background(), f.db.ForUser(f.alice), history, "первое"); err != nil {
 		t.Fatal(err)
 	}

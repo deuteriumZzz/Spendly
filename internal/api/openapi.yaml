@@ -29,6 +29,10 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/Expense' } }
                   summary: { $ref: '#/components/schemas/Summary' }
+                  by_user:
+                    type: array
+                    description: Суммы по участникам семьи, по убыванию
+                    items: { $ref: '#/components/schemas/UserTotal' }
         '400': { $ref: '#/components/responses/BadRequest' }
     post:
       summary: Создать трату
@@ -128,6 +132,13 @@ components:
         count: { type: integer }
         total: { type: number }
         by_category: { type: object, additionalProperties: { type: number } }
+    UserTotal:
+      type: object
+      properties:
+        user_id: { type: integer, format: int64 }
+        name: { type: string }
+        count: { type: integer }
+        total: { type: number }
     User:
       type: object
       properties:

@@ -62,7 +62,7 @@ type check func(r *evalRun) error
 type evalCase struct {
 	group   string
 	msg     string // {bob_id} is replaced with the other member's expense id
-	history []expense.Message
+	history []Message
 	check   check
 }
 
@@ -118,7 +118,7 @@ var evalCases = []evalCase{
 	{group: "удаление", msg: "удали аренду", check: deleted("аренда", "2026-10-01")},
 	{group: "удаление", msg: "удали последнюю трату", check: deleted("кофе", "2026-10-16")},
 	{group: "удаление", msg: "удали такси", check: all(unchanged(), asks(), replyHas("1200"), replyHas("900"))},
-	{group: "удаление", msg: "первое", check: deleted("такси", "2026-10-15"), history: []expense.Message{
+	{group: "удаление", msg: "первое", check: deleted("такси", "2026-10-15"), history: []Message{
 		{Role: "user", Content: "удали такси"},
 		{Role: "assistant", Content: "Нашлось две траты «такси»: 1) 1 200 ₽ — 15.10, 2) 900 ₽ — 20.09. Какую удалить?"},
 	}},

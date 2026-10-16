@@ -30,15 +30,16 @@ type Config struct {
 }
 
 type Bot struct {
-	db    *expense.DB
-	agent *agent.Agent
-	cfg   Config
-	sem   chan struct{} // bounds concurrent LLM work, and with it DB connections
-	queue userQueue
+	db      *expense.DB
+	dialogs *Dialogs
+	agent   *agent.Agent
+	cfg     Config
+	sem     chan struct{} // bounds concurrent LLM work, and with it DB connections
+	queue   userQueue
 }
 
-func New(db *expense.DB, a *agent.Agent, cfg Config) *Bot {
-	return &Bot{db: db, agent: a, cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrency),
+func New(db *expense.DB, dialogs *Dialogs, a *agent.Agent, cfg Config) *Bot {
+	return &Bot{db: db, dialogs: dialogs, agent: a, cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrency),
 		queue: userQueue{m: map[int64]*userSlot{}}}
 }
 
@@ -175,25 +176,25 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 		return ""
 	}
 	defer func() { <-b.sem }()
-	unlock, err := b.db.LockUser(ctx, user.ID)
+	unlock, err := b.dialogs.Lock(ctx, user.ID)
 	if err != nil {
 		return b.fail("lock user", user.ID, err)
 	}
 	defer unlock()
 
-	msgID, fresh, err := b.db.SaveMessage(ctx, user.ID, &updateID, expense.Message{Role: "user", Content: text})
+	msgID, fresh, err := b.dialogs.Save(ctx, user.ID, &updateID, "user", text)
 	if err != nil {
 		return b.fail("save message", user.ID, err)
 	}
 	if !fresh {
 		return "" // Telegram redelivered an update that was already handled
 	}
-	if n, err := b.db.CountUserMessages(ctx, user.ID, time.Now().Add(-time.Hour)); err != nil {
+	if n, err := b.dialogs.CountUserMessages(ctx, user.ID, time.Now().Add(-time.Hour)); err != nil {
 		slog.Error("rate limit check", "user", user.ID, "err", err)
 	} else if n > b.cfg.RatePerHour {
 		return rateLimited
 	}
-	history, err := b.db.History(ctx, user.ID, msgID, b.cfg.HistorySize)
+	history, err := b.dialogs.History(ctx, user.ID, msgID, b.cfg.HistorySize)
 	if err != nil {
 		return b.fail("load history", user.ID, err)
 	}
@@ -211,7 +212,7 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 		slog.Error("bot: agent failed after changes", "user", user.ID, "err", err)
 	}
 	reply = clip(reply)
-	if _, _, err := b.db.SaveMessage(ctx, user.ID, nil, expense.Message{Role: "assistant", Content: reply}); err != nil {
+	if _, _, err := b.dialogs.Save(ctx, user.ID, nil, "assistant", reply); err != nil {
 		slog.Error("save reply", "user", user.ID, "err", err)
 	}
 	return reply

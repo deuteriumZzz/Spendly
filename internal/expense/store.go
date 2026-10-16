@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -17,10 +15,7 @@ import (
 // DefaultFamilyID is the family created by the first migration.
 const DefaultFamilyID int64 = 1
 
-var (
-	ErrNotFound     = errors.New("трата не найдена")
-	ErrUserNotFound = errors.New("участник не найден")
-)
+var ErrNotFound = errors.New("трата не найдена")
 
 // DB is the root data access. Expenses are only reachable through a Store
 // that is already scoped to a family (web panel) or to one user (bot).
@@ -100,6 +95,8 @@ func scanExpense(row pgx.Row) (Expense, error) {
 	return e, err
 }
 
+// List pages with limit/offset: a family has thousands of expenses, not
+// millions, so offset stays cheap; the index on (family_id, spent_at) serves it.
 func (s *Store) List(ctx context.Context, f Filter) ([]Expense, error) {
 	q := &query{}
 	where := s.where(q, f)
@@ -155,6 +152,34 @@ func (s *Store) Sum(ctx context.Context, f Filter) (Summary, error) {
 		sum.ByCategory[c] = m
 	}
 	return sum, rows.Err()
+}
+
+// UserTotal — траты одного участника в пределах фильтра.
+type UserTotal struct {
+	UserID int64  `json:"user_id"`
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Total  Money  `json:"total"`
+}
+
+// TotalsByUser sums the filtered expenses per member, largest first.
+func (s *Store) TotalsByUser(ctx context.Context, f Filter) ([]UserTotal, error) {
+	q := &query{}
+	sql := `SELECT e.user_id, u.name, count(*), (sum(e.amount) * 100)::bigint
+		FROM expenses e JOIN users u ON u.telegram_id = e.user_id
+		WHERE ` + s.where(q, f) + ` GROUP BY e.user_id, u.name ORDER BY 4 DESC, u.name`
+	rows, err := s.pool.Query(ctx, sql, q.args...)
+	if err != nil {
+		return nil, fmt.Errorf("totals by user: %w", err)
+	}
+	totals, err := pgx.CollectRows(rows, pgx.RowToStructByPos[UserTotal])
+	if err != nil {
+		return nil, fmt.Errorf("totals by user: %w", err)
+	}
+	if totals == nil {
+		totals = []UserTotal{}
+	}
+	return totals, nil
 }
 
 func (s *Store) Create(ctx context.Context, in Input) (Expense, error) {
@@ -233,147 +258,4 @@ func mapErr(op string, err error) error {
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}
-}
-
-// User is a family member; ID is the Telegram user id.
-type User struct {
-	ID       int64  `json:"id"`
-	FamilyID int64  `json:"-"`
-	Name     string `json:"name"`
-}
-
-func (db *DB) GetUser(ctx context.Context, id int64) (User, error) {
-	u := User{ID: id}
-	err := db.pool.QueryRow(ctx, `SELECT family_id, name FROM users WHERE telegram_id = $1`, id).
-		Scan(&u.FamilyID, &u.Name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, ErrUserNotFound
-	}
-	if err != nil {
-		return User{}, fmt.Errorf("get user: %w", err)
-	}
-	return u, nil
-}
-
-// EnsureUser adds a newcomer to the family (open mode). An existing user keeps
-// their family and name.
-func (db *DB) EnsureUser(ctx context.Context, id, familyID int64, name string) (User, error) {
-	_, err := db.pool.Exec(ctx, `INSERT INTO users (telegram_id, family_id, name) VALUES ($1, $2, $3)
-		ON CONFLICT (telegram_id) DO NOTHING`, id, familyID, name)
-	if err != nil {
-		return User{}, fmt.Errorf("ensure user: %w", err)
-	}
-	return db.GetUser(ctx, id)
-}
-
-// SaveMember upserts a member from config; config is the source of truth for the name.
-func (db *DB) SaveMember(ctx context.Context, id, familyID int64, name string) error {
-	_, err := db.pool.Exec(ctx, `INSERT INTO users (telegram_id, family_id, name) VALUES ($1, $2, $3)
-		ON CONFLICT (telegram_id) DO UPDATE SET name = EXCLUDED.name`, id, familyID, name)
-	if err != nil {
-		return fmt.Errorf("save member: %w", err)
-	}
-	return nil
-}
-
-func (db *DB) Users(ctx context.Context, familyID int64) ([]User, error) {
-	rows, err := db.pool.Query(ctx,
-		`SELECT telegram_id, family_id, name FROM users WHERE family_id = $1 ORDER BY name`, familyID)
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-	users, err := pgx.CollectRows(rows, pgx.RowToStructByPos[User])
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-	if users == nil {
-		users = []User{}
-	}
-	return users, nil
-}
-
-// Message is one line of the bot dialog history.
-type Message struct {
-	Role    string // "user" | "assistant"
-	Content string
-}
-
-// SaveMessage stores a dialog message and returns its id. For an incoming
-// message updateID dedupes Telegram redeliveries: ok=false means this update
-// was already processed.
-func (db *DB) SaveMessage(ctx context.Context, userID int64, updateID *int64, m Message) (id int64, ok bool, err error) {
-	err = db.pool.QueryRow(ctx, `INSERT INTO messages (user_id, update_id, role, content)
-		VALUES ($1, $2, $3, $4) ON CONFLICT (update_id) DO NOTHING RETURNING id`,
-		userID, updateID, m.Role, m.Content).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, fmt.Errorf("save message: %w", err)
-	}
-	return id, true, nil
-}
-
-// historyWindow drops stale context: yesterday's dialog should not change what
-// «последнее» means today.
-const historyWindow = 6 * time.Hour
-
-// History returns up to n messages sent before message beforeID, oldest first.
-func (db *DB) History(ctx context.Context, userID, beforeID int64, n int) ([]Message, error) {
-	rows, err := db.pool.Query(ctx, `SELECT role, content FROM messages
-		WHERE user_id = $1 AND id < $2 AND created_at > $3
-		ORDER BY id DESC LIMIT $4`, userID, beforeID, time.Now().Add(-historyWindow), n)
-	if err != nil {
-		return nil, fmt.Errorf("history: %w", err)
-	}
-	msgs, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Message])
-	if err != nil {
-		return nil, fmt.Errorf("history: %w", err)
-	}
-	slices.Reverse(msgs)
-	return msgs, nil
-}
-
-// PruneMessages deletes dialog messages older than before: chat texts are
-// personal data and are needed only for a few hours of context.
-func (db *DB) PruneMessages(ctx context.Context, before time.Time) (int64, error) {
-	tag, err := db.pool.Exec(ctx, `DELETE FROM messages WHERE created_at < $1`, before)
-	if err != nil {
-		return 0, fmt.Errorf("prune messages: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
-// CountUserMessages counts incoming messages since t — the per-user rate limit.
-func (db *DB) CountUserMessages(ctx context.Context, userID int64, since time.Time) (int, error) {
-	var n int
-	err := db.pool.QueryRow(ctx, `SELECT count(*) FROM messages
-		WHERE user_id = $1 AND role = 'user' AND created_at > $2`, userID, since).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count messages: %w", err)
-	}
-	return n, nil
-}
-
-// LockUser serializes one user's messages across all replicas with a Postgres
-// advisory lock. It holds one pool connection until unlock is called.
-func (db *DB) LockUser(ctx context.Context, userID int64) (unlock func(), err error) {
-	conn, err := db.pool.Acquire(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("lock user: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, userID); err != nil {
-		conn.Release()
-		return nil, fmt.Errorf("lock user: %w", err)
-	}
-	return func() {
-		// The request context may already be cancelled; unlock regardless.
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, userID); err != nil {
-			// Unknown session state: close it so the lock dies with the session.
-			_ = conn.Conn().Close(ctx)
-		}
-		conn.Release()
-	}, nil
 }

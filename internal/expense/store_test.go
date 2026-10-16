@@ -155,31 +155,6 @@ func TestCreateForUnknownMember(t *testing.T) {
 	}
 }
 
-func TestMessagesDedupeAndHistory(t *testing.T) {
-	f := setup(t)
-	ctx := context.Background()
-	update := int64(555)
-	if _, ok, err := f.db.SaveMessage(ctx, f.alice.ID, &update, expense.Message{Role: "user", Content: "кофе 350"}); err != nil || !ok {
-		t.Fatalf("first save: ok=%v err=%v", ok, err)
-	}
-	if _, ok, err := f.db.SaveMessage(ctx, f.alice.ID, &update, expense.Message{Role: "user", Content: "кофе 350"}); err != nil || ok {
-		t.Errorf("redelivered update saved again: ok=%v err=%v", ok, err)
-	}
-	if _, _, err := f.db.SaveMessage(ctx, f.alice.ID, nil, expense.Message{Role: "assistant", Content: "Записал"}); err != nil {
-		t.Fatal(err)
-	}
-	next := int64(556)
-	current, _, _ := f.db.SaveMessage(ctx, f.alice.ID, &next, expense.Message{Role: "user", Content: "покажи"})
-
-	hist, err := f.db.History(ctx, f.alice.ID, current, 10)
-	if err != nil || len(hist) != 2 || hist[0].Content != "кофе 350" || hist[1].Role != "assistant" {
-		t.Errorf("history = %+v, %v", hist, err)
-	}
-	if n, _ := f.db.CountUserMessages(ctx, f.alice.ID, time.Now().Add(-time.Hour)); n != 2 {
-		t.Errorf("user messages in the last hour = %d, want 2", n)
-	}
-}
-
 func TestListLimitIsCapped(t *testing.T) {
 	f := setup(t)
 	s := f.db.ForUser(f.alice)
@@ -195,36 +170,22 @@ func TestListLimitIsCapped(t *testing.T) {
 	}
 }
 
-func TestPruneMessages(t *testing.T) {
+func TestTotalsByUser(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	if _, _, err := f.db.SaveMessage(ctx, f.alice.ID, nil, expense.Message{Role: "user", Content: "кофе 350"}); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := f.db.PruneMessages(ctx, time.Now().Add(-time.Hour)); err != nil || n != 0 {
-		t.Errorf("pruned a fresh message: n=%d err=%v", n, err)
-	}
-	if n, err := f.db.PruneMessages(ctx, time.Now().Add(time.Minute)); err != nil || n != 1 {
-		t.Errorf("old message not pruned: n=%d err=%v", n, err)
-	}
-}
+	family := f.db.ForFamily(expense.DefaultFamilyID)
+	mustCreate(t, family, expense.Input{UserID: f.alice.ID, Amount: 35000, Category: "еда", SpentAt: today})
+	mustCreate(t, family, expense.Input{UserID: f.bob.ID, Amount: 120000, Category: "транспорт", SpentAt: today})
+	mustCreate(t, family, expense.Input{UserID: f.bob.ID, Amount: 10000, Category: "еда", SpentAt: today})
 
-func TestLockUserSerializes(t *testing.T) {
-	f := setup(t)
-	ctx := context.Background()
-	unlock, err := f.db.LockUser(ctx, f.alice.ID)
-	if err != nil {
-		t.Fatal(err)
+	got, err := family.TotalsByUser(ctx, expense.Filter{})
+	if err != nil || len(got) != 2 || got[0].Name != "Боб" || got[0].Total != 130000 || got[0].Count != 2 || got[1].Total != 35000 {
+		t.Errorf("totals = %+v, %v; want Боб 1300.00 (2) first, then Алиса 350.00", got, err)
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-	defer cancel()
-	if _, err := f.db.LockUser(waitCtx, f.alice.ID); err == nil {
-		t.Fatal("second lock acquired while the first is held")
+	if got, _ := family.TotalsByUser(ctx, expense.Filter{Category: "транспорт"}); len(got) != 1 || got[0].UserID != f.bob.ID {
+		t.Errorf("filtered totals = %+v", got)
 	}
-	unlock()
-	unlock2, err := f.db.LockUser(ctx, f.alice.ID)
-	if err != nil {
-		t.Fatalf("lock after unlock: %v", err)
+	if got, _ := f.db.ForUser(f.alice).TotalsByUser(ctx, expense.Filter{}); len(got) != 1 || got[0].UserID != f.alice.ID {
+		t.Errorf("user scope leaked other members: %+v", got)
 	}
-	unlock2()
 }

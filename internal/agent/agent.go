@@ -31,7 +31,7 @@ const fallbackReply = "Не получилось разобрать запрос
 // If it fails after changing data, it returns both an error and a reply listing
 // the changes: telling the user only «не получилось» would make them repeat
 // the message and duplicate the expense.
-func (a *Agent) Reply(ctx context.Context, store *expense.Store, history []expense.Message, text string) (string, error) {
+func (a *Agent) Reply(ctx context.Context, store *expense.Store, history []Message, text string) (string, error) {
 	now := a.now().In(a.loc)
 	today := now.Format(time.DateOnly)
 
