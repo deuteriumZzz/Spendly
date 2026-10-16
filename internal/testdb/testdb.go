@@ -39,7 +39,7 @@ func New(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `TRUNCATE users, expenses, messages RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE users, expenses, messages, invites RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	return pool

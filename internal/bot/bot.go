@@ -22,7 +22,7 @@ import (
 
 type Config struct {
 	FamilyID       int64
-	Members        map[int64]string // FAMILY_MEMBERS; empty — open mode, anyone joins the family
+	Members        map[int64]string // FAMILY_MEMBERS; empty — open mode, anyone joins the family; set — only them and those who joined by an invite
 	RatePerHour    int
 	MaxConcurrency int
 	HistorySize    int
@@ -102,6 +102,8 @@ const (
 	tooLong     = "Слишком длинное сообщение. Опиши трату короче, например: «такси 1200 вчера»."
 	rateLimited = "Слишком много сообщений за час. Попробуй чуть позже."
 	failed      = "Не получилось обработать сообщение — попробуй ещё раз через минуту."
+	stranger    = "Этот бот только для участников семьи. Попроси у главы семьи ссылку-приглашение из веб-панели (или назови ему свой Telegram ID: %d)."
+	badInvite   = "Ссылка-приглашение недействительна: она уже использована или устарела. Попроси у главы семьи новую."
 )
 
 // Handle is the go-telegram/bot handler; the library runs it in a goroutine per update.
@@ -148,15 +150,17 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 	switch {
 	case text == "":
 		return textOnly
-	case text == "/start" || strings.HasPrefix(text, "/start ") || text == "/help":
+	case text == "/start" || text == "/help":
 		return greeting
+	case strings.HasPrefix(text, "/start "):
+		return b.join(ctx, msg.From, strings.TrimSpace(strings.TrimPrefix(text, "/start ")))
 	case utf8.RuneCountInString(text) > maxInputRunes:
 		return tooLong
 	}
 
 	user, err := b.user(ctx, msg.From)
 	if errors.Is(err, expense.ErrUserNotFound) {
-		return fmt.Sprintf("Этот бот только для участников семьи. Твой Telegram ID: %d — попроси главу семьи добавить его в FAMILY_MEMBERS.", msg.From.ID)
+		return fmt.Sprintf(stranger, msg.From.ID)
 	}
 	if err != nil {
 		return b.fail("resolve user", msg.From.ID, err)
@@ -218,12 +222,29 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 	return reply
 }
 
+// join handles an invite link: t.me/<bot>?start=<code> arrives as "/start <code>".
+func (b *Bot) join(ctx context.Context, from *models.User, code string) string {
+	u, err := b.db.AcceptInvite(ctx, code, from.ID)
+	if err == nil {
+		slog.Info("joined by invite", "user", from.ID, "name", u.Name)
+		return fmt.Sprintf("Привет, %s! Ты в семье. ", u.Name) + strings.TrimPrefix(greeting, "Привет! ")
+	}
+	if !errors.Is(err, expense.ErrInviteInvalid) {
+		return b.fail("accept invite", from.ID, err)
+	}
+	// A member who taps the link again (or anyone in open mode) just gets the greeting.
+	if _, err := b.user(ctx, from); err == nil {
+		return greeting
+	}
+	return badInvite
+}
+
 func (b *Bot) user(ctx context.Context, from *models.User) (expense.User, error) {
 	if len(b.cfg.Members) > 0 {
-		if _, ok := b.cfg.Members[from.ID]; !ok {
-			return expense.User{}, expense.ErrUserNotFound
+		if _, ok := b.cfg.Members[from.ID]; ok {
+			return b.db.GetUser(ctx, from.ID) // members are saved from config at startup
 		}
-		return b.db.GetUser(ctx, from.ID) // members are saved from config at startup
+		return b.db.InvitedUser(ctx, from.ID)
 	}
 	name := strings.TrimSpace(from.FirstName + " " + from.LastName)
 	if name == "" {

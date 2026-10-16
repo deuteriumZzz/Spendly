@@ -189,3 +189,91 @@ func TestTotalsByUser(t *testing.T) {
 		t.Errorf("user scope leaked other members: %+v", got)
 	}
 }
+
+func TestInvites(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	inv, err := f.db.CreateInvite(ctx, expense.DefaultFamilyID, "Мама")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Code) < 20 || time.Until(inv.ExpiresAt) < 6*24*time.Hour {
+		t.Errorf("invite %+v", inv)
+	}
+	if _, err := f.db.InvitedUser(ctx, 555); !errors.Is(err, expense.ErrUserNotFound) {
+		t.Errorf("not joined yet: %v", err)
+	}
+
+	u, err := f.db.AcceptInvite(ctx, inv.Code, 555)
+	if err != nil || u.Name != "Мама" || u.FamilyID != expense.DefaultFamilyID {
+		t.Fatalf("accept: %+v, %v", u, err)
+	}
+	if got, err := f.db.InvitedUser(ctx, 555); err != nil || got.Name != "Мама" {
+		t.Errorf("invited user: %+v, %v", got, err)
+	}
+	// One-time: whoever gets the forwarded link next stays out.
+	for _, code := range []string{inv.Code, "no-such-code"} {
+		if _, err := f.db.AcceptInvite(ctx, code, 556); !errors.Is(err, expense.ErrInviteInvalid) {
+			t.Errorf("code %q: %v, want ErrInviteInvalid", code, err)
+		}
+	}
+
+	// A member who was already here (open mode, config) takes the invite's name.
+	if _, err := f.db.InvitedUser(ctx, f.alice.ID); !errors.Is(err, expense.ErrUserNotFound) {
+		t.Errorf("alice is not invited yet: %v", err)
+	}
+	inv2, _ := f.db.CreateInvite(ctx, expense.DefaultFamilyID, "Дочь")
+	if u, err := f.db.AcceptInvite(ctx, inv2.Code, f.alice.ID); err != nil || u.Name != "Дочь" {
+		t.Errorf("existing member: %+v, %v", u, err)
+	}
+}
+
+func TestInviteExpiresAndKeepsOtherFamilies(t *testing.T) {
+	pool := testdb.New(t)
+	db := expense.NewDB(pool)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO families (id, name) VALUES (2, 'Соседи') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EnsureUser(ctx, 900, 2, "Сосед"); err != nil {
+		t.Fatal(err)
+	}
+
+	inv, _ := db.CreateInvite(ctx, expense.DefaultFamilyID, "Мама")
+	// Someone from another family is not moved, and the code stays usable.
+	if _, err := db.AcceptInvite(ctx, inv.Code, 900); !errors.Is(err, expense.ErrInviteInvalid) {
+		t.Errorf("other family: %v", err)
+	}
+	if u, _ := db.GetUser(ctx, 900); u.FamilyID != 2 || u.Name != "Сосед" {
+		t.Errorf("other family member changed: %+v", u)
+	}
+	if _, err := db.AcceptInvite(ctx, inv.Code, 555); err != nil {
+		t.Errorf("code was spent by the failed attempt: %v", err)
+	}
+
+	old, _ := db.CreateInvite(ctx, expense.DefaultFamilyID, "Папа")
+	if _, err := pool.Exec(ctx, `UPDATE invites SET expires_at = now() - interval '1 second' WHERE code = $1`, old.Code); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AcceptInvite(ctx, old.Code, 556); !errors.Is(err, expense.ErrInviteInvalid) {
+		t.Errorf("expired code: %v", err)
+	}
+}
+
+func TestRenameUser(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := f.db.RenameUser(ctx, expense.DefaultFamilyID, f.alice.ID, "Мама"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.RenameUser(ctx, 2, f.alice.ID, "Чужая"); !errors.Is(err, expense.ErrUserNotFound) {
+		t.Errorf("rename from another family: %v", err)
+	}
+	// The config name is only the initial one: a restart keeps the panel's rename.
+	if err := f.db.SaveMember(ctx, f.alice.ID, expense.DefaultFamilyID, "Алиса"); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := f.db.GetUser(ctx, f.alice.ID); u.Name != "Мама" {
+		t.Errorf("name after restart = %q, want Мама", u.Name)
+	}
+}

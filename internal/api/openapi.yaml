@@ -76,6 +76,45 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/User' } }
+  /api/users/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 }, description: Telegram ID }
+    patch:
+      summary: Переименовать участника («Мария Иванова» → «Мама»)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NameInput' } } }
+      responses:
+        '200':
+          description: Участник с новым именем
+          content: { application/json: { schema: { $ref: '#/components/schemas/User' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/invites:
+    post:
+      summary: Пригласить в семью
+      description: >
+        Одноразовая ссылка на бота на 7 дней. Человек открывает её и нажимает «Запустить» —
+        бот получает код как `/start <code>` и добавляет его в семью под указанным именем.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NameInput' } } }
+      responses:
+        '201':
+          description: Приглашение
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  expires_at: { type: string, format: date-time }
+                  url: { type: string, example: 'https://t.me/spendly_bot?start=K7QXM2…' }
+                  qr_svg: { type: string, description: QR-код ссылки, SVG чёрным по белому }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503':
+          description: Бот не запущен (нет TELEGRAM_TOKEN) — ссылку не на что дать
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /api/categories:
     get:
       summary: Допустимые категории
@@ -144,6 +183,11 @@ components:
       properties:
         id: { type: integer, format: int64, description: Telegram ID }
         name: { type: string }
+    NameInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40, example: Мама }
     Error:
       type: object
       properties:
@@ -154,5 +198,5 @@ components:
       description: Ошибка во входных данных
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
-      description: Трата не найдена
+      description: Трата или участник не найдены
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

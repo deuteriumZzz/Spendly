@@ -6,6 +6,7 @@ require (
 	github.com/go-telegram/bot v1.27.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.29.0
+	rsc.io/qr v0.2.0
 )
 
 require (

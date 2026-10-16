@@ -318,7 +318,7 @@ const form = $('form');
 
 function openForm(e = null) {
   if (!state.users.length) {
-    toast('В семье пока нет участников: задайте FAMILY_MEMBERS или напишите боту', { error: true });
+    toast('В семье пока нет участников: пригласите их через «Семья»', { error: true });
     return;
   }
   state.editing = e;
@@ -335,17 +335,18 @@ function openForm(e = null) {
   form.amount.focus();
 }
 
-function closeForm() {
-  if (!dialog.open || dialog.classList.contains('closing')) return;
-  dialog.classList.add('closing');
+function closeDialog(d) {
+  if (!d.open || d.classList.contains('closing')) return;
+  d.classList.add('closing');
   const finish = () => {
-    if (!dialog.classList.contains('closing')) return;
-    dialog.classList.remove('closing');
-    dialog.close();
+    if (!d.classList.contains('closing')) return;
+    d.classList.remove('closing');
+    d.close();
   };
-  dialog.addEventListener('animationend', finish, { once: true });
+  d.addEventListener('animationend', finish, { once: true });
   setTimeout(finish, 400); // in case animationend never fires
 }
+const closeForm = () => closeDialog(dialog);
 
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -409,12 +410,100 @@ $('rows').addEventListener('click', (ev) => {
   else remove(e);
 });
 
-dialog.addEventListener('cancel', (ev) => { ev.preventDefault(); closeForm(); }); // Esc animates out too
-dialog.addEventListener('click', (ev) => { if (ev.target === dialog) closeForm(); }); // backdrop click
+for (const d of document.querySelectorAll('dialog')) {
+  d.addEventListener('cancel', (ev) => { ev.preventDefault(); closeDialog(d); }); // Esc animates out too
+  d.addEventListener('click', (ev) => { if (ev.target === d || ev.target.closest('[data-close]')) closeDialog(d); }); // backdrop, ×
+}
 $('cancel').addEventListener('click', closeForm);
 $('close-x').addEventListener('click', closeForm);
 $('add').addEventListener('click', () => openForm());
 $('more-btn').addEventListener('click', () => load({ append: true }));
+
+// ---------- family: names and invites ----------
+
+const familyDialog = $('family-dialog');
+const inviteForm = $('invite-form');
+const dateLong = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
+
+// loadUsers refreshes every place that lists members, keeping current selections.
+async function loadUsers() {
+  state.users = await api('GET', '/api/users');
+  const opts = state.users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+  for (const sel of [$('f-user'), form.user_id]) {
+    const keep = sel.value;
+    sel.innerHTML = (sel === $('f-user') ? '<option value="">Все</option>' : '') + opts;
+    sel.value = keep;
+  }
+  $('members').innerHTML = state.users.map((u) => `
+    <li class="member"><span class="avatar">${esc(initials(u.name))}</span>
+      <input value="${esc(u.name)}" maxlength="40" data-id="${u.id}" aria-label="Имя участника ${esc(u.name)}"></li>`).join('')
+    || '<li class="muted">Пока никого — пригласите первого участника.</li>';
+}
+
+async function openFamily() {
+  inviteForm.reset();
+  $('invite-error').textContent = '';
+  $('invite').hidden = true;
+  try {
+    await loadUsers(); // someone may have joined by a link since the page loaded
+  } catch (e) {
+    toast(e.message, { error: true });
+  }
+  familyDialog.showModal();
+  inviteForm.name.focus();
+}
+
+$('members').addEventListener('change', async (ev) => {
+  const input = ev.target.closest('input[data-id]');
+  if (!input) return;
+  const old = state.users.find((u) => u.id === Number(input.dataset.id));
+  try {
+    const u = await api('PATCH', `/api/users/${input.dataset.id}`, { name: input.value });
+    toast(`Переименовано: ${old.name} → ${u.name}`);
+    await loadUsers();
+    load(); // the list shows names too
+  } catch (e) {
+    input.value = old.name;
+    toast(e.message, { error: true });
+  }
+});
+// Enter saves the name the same way leaving the field does.
+$('members').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') ev.target.blur(); });
+
+inviteForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = $('invite-btn');
+  btn.setAttribute('aria-busy', 'true');
+  $('invite-error').textContent = '';
+  try {
+    const inv = await api('POST', '/api/invites', { name: inviteForm.name.value });
+    $('invite-qr').src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(inv.qr_svg)}`;
+    $('invite-qr').alt = `QR-код приглашения для: ${inv.name}`;
+    $('invite-title').textContent = `Приглашение для: ${inv.name}`;
+    $('invite-hint').textContent = `Ссылка одноразовая и действует до ${dateLong.format(new Date(inv.expires_at))}. `
+      + 'Откройте её на телефоне участника или наведите камеру на QR — Telegram откроет бота, останется нажать «Запустить».';
+    $('invite-url').value = inv.url;
+    $('invite-share').href = `https://t.me/share/url?url=${encodeURIComponent(inv.url)}`
+      + `&text=${encodeURIComponent('Присоединяйся к семейному учёту расходов')}`;
+    $('invite').hidden = false;
+    $('invite').scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    inviteForm.reset();
+  } catch (e) {
+    $('invite-error').textContent = e.message;
+  } finally {
+    btn.removeAttribute('aria-busy');
+  }
+});
+
+$('invite-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('invite-url').value);
+    toast('Ссылка скопирована');
+  } catch {
+    $('invite-url').select(); // no clipboard permission: leave it selected for ⌘C
+  }
+});
+$('family').addEventListener('click', openFamily);
 
 // ---------- filters ----------
 
@@ -457,7 +546,7 @@ $('filters-toggle').addEventListener('click', () => {
 
 // N — new expense (Т on the Russian layout), / — search.
 document.addEventListener('keydown', (ev) => {
-  if (dialog.open || ev.metaKey || ev.ctrlKey || ev.altKey || ev.target.closest('input, select, textarea')) return;
+  if (document.querySelector('dialog[open]') || ev.metaKey || ev.ctrlKey || ev.altKey || ev.target.closest('input, select, textarea')) return;
   if (ev.key === 'n' || ev.key === 'т') { ev.preventDefault(); openForm(); }
   if (ev.key === '/') { ev.preventDefault(); $('f-text').focus(); }
 });
@@ -485,11 +574,7 @@ applyTheme(THEMES.includes(theme) ? theme : 'system');
 
 (async () => {
   try {
-    const [users, categories] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/categories')]);
-    state.users = users;
-    const userOpts = users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
-    $('f-user').insertAdjacentHTML('beforeend', userOpts);
-    form.user_id.innerHTML = userOpts;
+    const [, categories] = await Promise.all([loadUsers(), api('GET', '/api/categories')]);
     $('f-category').insertAdjacentHTML('beforeend',
       categories.map((c) => `<option value="${esc(c)}">${CATEGORIES[c] ?? ''} ${esc(c)}</option>`).join(''));
     $('cat-chips').innerHTML = categories.map((c) => `

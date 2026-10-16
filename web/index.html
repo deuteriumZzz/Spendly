@@ -26,6 +26,10 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg>
       </a>
       <button class="ghost icon-btn" id="theme" type="button" aria-label="Тема оформления"></button>
+      <button class="ghost" id="family" type="button" aria-label="Семья: участники и приглашения">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg>
+        <span class="family-label">Семья</span>
+      </button>
       <button class="primary" id="add" type="button">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>Добавить</span><kbd>N</kbd>
@@ -140,6 +144,41 @@
       <button class="primary" type="submit" id="save">Сохранить</button>
     </footer>
   </form>
+</dialog>
+
+<dialog id="family-dialog" aria-labelledby="family-title">
+  <div class="dialog-body">
+    <header class="dialog-head">
+      <h2 id="family-title">Семья</h2>
+      <button type="button" class="ghost icon-btn" data-close aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <p class="hint">Каждый видит в боте только свои траты, вы здесь — траты всех. Имя можно поправить прямо в списке.</p>
+    <ul class="members" id="members"></ul>
+
+    <form class="invite-form" id="invite-form">
+      <h3>Пригласить участника</h3>
+      <div class="invite-row">
+        <label class="field"><span>Как подписать</span><input name="name" maxlength="40" required placeholder="Мама, Сын…" autocomplete="off"></label>
+        <button class="primary" type="submit" id="invite-btn">Создать ссылку</button>
+      </div>
+      <p class="form-error" id="invite-error" role="alert"></p>
+    </form>
+
+    <section class="invite" id="invite" hidden aria-labelledby="invite-title">
+      <img id="invite-qr" alt="" width="168" height="168">
+      <div class="invite-info">
+        <p class="invite-title" id="invite-title"></p>
+        <p class="hint" id="invite-hint"></p>
+        <div class="invite-link">
+          <input id="invite-url" readonly aria-label="Ссылка-приглашение">
+          <button class="ghost" type="button" id="invite-copy">Копировать</button>
+        </div>
+        <a class="primary" id="invite-share" target="_blank" rel="noopener">Отправить в Telegram</a>
+      </div>
+    </section>
+  </div>
 </dialog>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>

@@ -20,7 +20,7 @@ func TestExpensesCRUD(t *testing.T) {
 	if _, err := db.EnsureUser(context.Background(), 101, expense.DefaultFamilyID, "Алиса"); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(api.New(db, expense.DefaultFamilyID, time.UTC, nil).Handler())
+	srv := httptest.NewServer(api.New(db, expense.DefaultFamilyID, time.UTC, nil, "spendly_test_bot").Handler())
 	defer srv.Close()
 
 	do := func(method, path, body string) (int, map[string]any) {
@@ -78,13 +78,58 @@ func TestExpensesCRUD(t *testing.T) {
 	}
 }
 
+func TestInvitesAndRename(t *testing.T) {
+	db := expense.NewDB(testdb.New(t))
+	if _, err := db.EnsureUser(context.Background(), 101, expense.DefaultFamilyID, "Алиса"); err != nil {
+		t.Fatal(err)
+	}
+	send := func(h http.Handler, method, path, body string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Host = "localhost:8080"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.NewDecoder(rec.Body).Decode(&out)
+		return rec.Code, out
+	}
+	h := api.New(db, expense.DefaultFamilyID, time.UTC, nil, "spendly_test_bot").Handler()
+
+	code, inv := send(h, "POST", "/api/invites", `{"name": " Мама "}`)
+	url, _ := inv["url"].(string)
+	svg, _ := inv["qr_svg"].(string)
+	if code != http.StatusCreated || inv["name"] != "Мама" || !strings.HasPrefix(url, "https://t.me/spendly_test_bot?start=") ||
+		!strings.HasPrefix(svg, "<svg") || inv["code"] != nil {
+		t.Fatalf("create invite: %d %v", code, inv)
+	}
+	// The link works: the code from it lets a new person in under the given name.
+	u, err := db.AcceptInvite(context.Background(), strings.TrimPrefix(url, "https://t.me/spendly_test_bot?start="), 555)
+	if err != nil || u.Name != "Мама" {
+		t.Errorf("accept the code from the link: %+v, %v", u, err)
+	}
+	if code, _ := send(h, "POST", "/api/invites", `{"name": "  "}`); code != http.StatusBadRequest {
+		t.Errorf("empty name: %d", code)
+	}
+	off := api.New(db, expense.DefaultFamilyID, time.UTC, nil, "").Handler()
+	if code, _ := send(off, "POST", "/api/invites", `{"name": "Сын"}`); code != http.StatusServiceUnavailable {
+		t.Errorf("invite with the bot off: %d", code)
+	}
+
+	if code, got := send(h, "PATCH", "/api/users/101", `{"name": "Дочь"}`); code != http.StatusOK || got["name"] != "Дочь" {
+		t.Errorf("rename: %d %v", code, got)
+	}
+	if code, _ := send(h, "PATCH", "/api/users/999", `{"name": "Кто-то"}`); code != http.StatusNotFound {
+		t.Errorf("rename unknown: %d", code)
+	}
+}
+
 // The panel has no auth, so other websites must not reach it through the visitor's browser.
 func TestPanelRejectsForeignSites(t *testing.T) {
 	db := expense.NewDB(testdb.New(t))
 	if _, err := db.EnsureUser(context.Background(), 101, expense.DefaultFamilyID, "Алиса"); err != nil {
 		t.Fatal(err)
 	}
-	h := api.New(db, expense.DefaultFamilyID, time.UTC, []string{"panel.example"}).Handler()
+	h := api.New(db, expense.DefaultFamilyID, time.UTC, []string{"panel.example"}, "").Handler()
 	serve := func(req *http.Request) *httptest.ResponseRecorder {
 		if req.Host == "example.com" { // httptest default; the panel's real host is localhost
 			req.Host = "localhost:8080"

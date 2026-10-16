@@ -316,7 +316,7 @@ dialog[open] { animation: pop-in var(--t-med) var(--ease-spring); }
 dialog.closing { animation: pop-out 170ms var(--ease) forwards; }
 dialog::backdrop { background: rgb(0 0 0 / 0.45); backdrop-filter: blur(3px); animation: fade-in var(--t-med) var(--ease); }
 dialog.closing::backdrop { animation: fade-out 170ms var(--ease) forwards; }
-#form { display: grid; gap: 16px; padding: 20px; }
+#form, .dialog-body { display: grid; gap: 16px; padding: 20px; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; }
 .dialog-head h2 { font-size: 18px; font-weight: 700; }
 .dialog-head .icon-btn { border-color: transparent; }
@@ -343,6 +343,34 @@ dialog.closing::backdrop { animation: fade-out 170ms var(--ease) forwards; }
 .form-error { color: var(--danger); font-size: 14px; }
 .form-error:empty { display: none; }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Family: names edit in place, the invite shows a QR beside the link. */
+.members { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.member { display: flex; align-items: center; gap: 10px; }
+.member input {
+  flex: 1; min-width: 0; height: 38px; padding: 0 10px; border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--ink); font: inherit; font-size: 15px;
+  transition: background-color var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.member input:hover { background: var(--surface-2); }
+.member input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.invite-form { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.invite-form h3 { font-size: 15px; font-weight: 650; }
+.invite-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.invite {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start;
+  padding: 14px; border-radius: 14px; background: var(--surface-2); animation: rise var(--t-med) var(--ease);
+}
+.invite[hidden] { display: none; }
+.invite img { display: block; width: 168px; height: 168px; border-radius: 10px; background: #fff; }
+.invite-info { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.invite-title { font-weight: 650; }
+.invite-link { display: flex; gap: 6px; }
+.invite-link input {
+  flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13px;
+}
+.invite .primary { justify-self: start; }
 
 /* ---------- toasts & tooltip ---------- */
 
@@ -425,4 +453,9 @@ dialog.closing::backdrop { animation: fade-out 170ms var(--ease) forwards; }
   .c-cat { order: 4; }
   .c-actions { order: 5; margin-left: auto; width: auto; }
   .grid2 { grid-template-columns: 1fr; }
+  .family-label { display: none; }
+  #family { width: 36px; padding: 0; }
+  .invite { grid-template-columns: 1fr; justify-items: center; }
+  .invite-info { width: 100%; }
+  .invite-row { grid-template-columns: 1fr; }
 }

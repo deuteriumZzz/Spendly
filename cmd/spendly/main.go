@@ -99,19 +99,9 @@ func serve(ctx context.Context) error {
 
 	go pruneMessages(ctx, dialogs)
 
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           api.New(db, expense.DefaultFamilyID, cfg.Location, cfg.PanelHosts).Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	httpErr := make(chan error, 1)
-	go func() {
-		slog.Info("http listening", "addr", cfg.HTTPAddr)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			httpErr <- err
-		}
-	}()
-
+	// The bot comes first: the panel needs its username for invite links.
+	var tg *tgbot.Bot
+	botName := ""
 	if cfg.TelegramToken == "" {
 		slog.Warn("TELEGRAM_TOKEN is not set: the bot is disabled, only the web panel is running")
 	} else {
@@ -127,12 +117,32 @@ func serve(ctx context.Context) error {
 			HistorySize:    10,
 			ReplyTimeout:   90 * time.Second,
 		})
-		tg, err := tgbot.New(cfg.TelegramToken, tgbot.WithDefaultHandler(b.Handle))
+		if tg, err = tgbot.New(cfg.TelegramToken, tgbot.WithDefaultHandler(b.Handle), tgbot.WithSkipGetMe()); err != nil {
+			return fmt.Errorf("telegram: %w", err)
+		}
+		me, err := tg.GetMe(ctx) // also checks the token
 		if err != nil {
 			return fmt.Errorf("telegram: %w", err)
 		}
+		botName = me.Username
+	}
+
+	srv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           api.New(db, expense.DefaultFamilyID, cfg.Location, cfg.PanelHosts, botName).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	httpErr := make(chan error, 1)
+	go func() {
+		slog.Info("http listening", "addr", cfg.HTTPAddr)
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			httpErr <- err
+		}
+	}()
+
+	if tg != nil {
 		go tg.Start(ctx)
-		slog.Info("telegram bot started (long polling)", "model", cfg.LLMModel)
+		slog.Info("telegram bot started (long polling)", "bot", "@"+botName, "model", cfg.LLMModel)
 		if len(cfg.Members) == 0 {
 			slog.Warn("FAMILY_MEMBERS is empty: open mode, anyone who finds the bot joins the family and uses the LLM budget")
 		}

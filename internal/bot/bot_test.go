@@ -126,6 +126,10 @@ func TestProcessRejectsStrangersWhenMembersSet(t *testing.T) {
 	if err := db.SaveMember(context.Background(), 555, expense.DefaultFamilyID, "Мама"); err != nil {
 		t.Fatal(err)
 	}
+	// Being in the users table is not enough (left from open mode, demo seed): only config or an invite.
+	if _, err := db.EnsureUser(context.Background(), 101, expense.DefaultFamilyID, "Алиса"); err != nil {
+		t.Fatal(err)
+	}
 	if got := b.Process(context.Background(), 1, private("кофе 350"), noTyping); !strings.Contains(got, "Telegram ID: 101") {
 		t.Errorf("stranger reply = %q", got)
 	}
@@ -133,6 +137,30 @@ func TestProcessRejectsStrangersWhenMembersSet(t *testing.T) {
 	member.From.ID = 555
 	if got := b.Process(context.Background(), 2, member, noTyping); got != "ответ на: кофе 350" || llm.calls != 1 {
 		t.Errorf("member reply = %q, llm calls %d", got, llm.calls)
+	}
+}
+
+func TestProcessJoinsByInvite(t *testing.T) {
+	b, llm, db := newBot(t, Config{Members: map[int64]string{555: "Мама"}})
+	ctx := context.Background()
+	inv, err := db.CreateInvite(ctx, expense.DefaultFamilyID, "Сын")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Process(ctx, 1, private("/start "+inv.Code), noTyping); !strings.HasPrefix(got, "Привет, Сын! Ты в семье. Я веду учёт") {
+		t.Errorf("join reply = %q", got)
+	}
+	if got := b.Process(ctx, 2, private("кофе 350"), noTyping); got != "ответ на: кофе 350" || llm.calls != 1 {
+		t.Errorf("after joining: reply %q, llm calls %d", got, llm.calls)
+	}
+	// The spent link: the member just gets the greeting, anyone else is sent for a new one.
+	if got := b.Process(ctx, 3, private("/start "+inv.Code), noTyping); got != greeting {
+		t.Errorf("member taps the link again: %q", got)
+	}
+	other := private("/start " + inv.Code)
+	other.From.ID, other.Chat.ID = 777, 777
+	if got := b.Process(ctx, 4, other, noTyping); got != badInvite {
+		t.Errorf("forwarded link: %q", got)
 	}
 }
 

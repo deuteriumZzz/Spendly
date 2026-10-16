@@ -23,10 +23,11 @@ type Server struct {
 	familyID int64
 	loc      *time.Location
 	hosts    []string // domain names the panel may be opened under, besides localhost and IPs
+	botName  string   // Telegram username for invite links; "" when the bot is off
 }
 
-func New(db *expense.DB, familyID int64, loc *time.Location, hosts []string) *Server {
-	return &Server{db: db, familyID: familyID, loc: loc, hosts: hosts}
+func New(db *expense.DB, familyID int64, loc *time.Location, hosts []string, botName string) *Server {
+	return &Server{db: db, familyID: familyID, loc: loc, hosts: hosts, botName: botName}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -36,6 +37,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/expenses/{id}", s.updateExpense)
 	mux.HandleFunc("DELETE /api/expenses/{id}", s.deleteExpense)
 	mux.HandleFunc("GET /api/users", s.listUsers)
+	mux.HandleFunc("PATCH /api/users/{id}", s.renameUser)
+	mux.HandleFunc("POST /api/invites", s.createInvite)
 	mux.HandleFunc("GET /api/categories", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, expense.Categories)
 	})
@@ -239,7 +242,7 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &verr):
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: verr.Msg, Field: verr.Field})
-	case errors.Is(err, expense.ErrNotFound):
+	case errors.Is(err, expense.ErrNotFound), errors.Is(err, expense.ErrUserNotFound):
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
 	default:
 		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)

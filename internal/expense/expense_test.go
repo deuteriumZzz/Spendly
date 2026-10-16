@@ -73,3 +73,14 @@ func TestInputValidate(t *testing.T) {
 		t.Error("empty patch accepted, want error")
 	}
 }
+
+func TestValidateName(t *testing.T) {
+	if got, err := ValidateName("  Мама "); err != nil || got != "Мама" {
+		t.Errorf("ValidateName = %q, %v", got, err)
+	}
+	for _, in := range []string{"", "   ", "оченьдлинноеимяоченьдлинноеимяоченьдлинно"} {
+		if _, err := ValidateName(in); err == nil {
+			t.Errorf("ValidateName(%q) accepted", in)
+		}
+	}
+}
