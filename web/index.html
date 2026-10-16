@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spendly — расходы семьи</title>
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --danger:#dc2626; --radius:10px; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#181b21; --text:#e6e8ec; --muted:#9aa3b2; --line:#2a2f38; --accent:#60a5fa; --danger:#f87171; } }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+h1 { font-size: 22px; margin: 0; }
+header p { margin: 2px 0 0; color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; padding: 16px; margin-bottom: 16px; align-items: end; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 38px; }
+button { font: inherit; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; min-height: 38px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.link { border: none; background: none; color: var(--accent); padding: 4px 6px; min-height: auto; }
+button.link.danger { color: var(--danger); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.summary { display: flex; gap: 8px 20px; flex-wrap: wrap; margin: 0 4px 12px; color: var(--muted); }
+.summary b { color: var(--text); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 13px; color: var(--muted); font-weight: 500; }
+td.amount, th.amount { text-align: right; font-variant-numeric: tabular-nums; }
+td.comment { white-space: normal; min-width: 160px; }
+tbody tr:last-child td { border-bottom: none; }
+.tag { font-size: 13px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.empty { padding: 40px 16px; text-align: center; color: var(--muted); }
+.more { display: flex; justify-content: center; padding: 12px; }
+.error { color: var(--danger); margin: 0 4px 12px; }
+.error:empty { display: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); padding: 20px; width: min(420px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgb(0 0 0 / .4); }
+dialog form { display: grid; gap: 12px; }
+dialog h2 { margin: 0 0 4px; font-size: 18px; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Spendly</h1><p>Расходы семьи</p></div>
+    <button class="primary" id="add">Добавить трату</button>
+  </header>
+
+  <section class="card filters" aria-label="Фильтры">
+    <label>Участник <select id="f-user"><option value="">Все</option></select></label>
+    <label>С <input type="date" id="f-from"></label>
+    <label>По <input type="date" id="f-to"></label>
+    <label>Категория <select id="f-category"><option value="">Все</option></select></label>
+    <button id="reset">Сбросить</button>
+  </section>
+
+  <p class="error" id="error" role="alert"></p>
+  <div class="summary" id="summary" aria-live="polite"></div>
+
+  <section class="card">
+    <div class="table-wrap"><table>
+      <thead><tr><th>Дата</th><th>Участник</th><th>Категория</th><th class="amount">Сумма</th><th>Комментарий</th><th><span class="visually-hidden">Действия</span></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="empty" id="empty" hidden>Трат нет. Напишите боту «кофе 350» или добавьте трату здесь.</div>
+    <div class="more" id="more" hidden><button id="more-btn">Показать ещё</button></div>
+  </section>
+</main>
+
+<dialog id="dialog" aria-labelledby="form-title">
+  <form id="form">
+    <h2 id="form-title">Новая трата</h2>
+    <label>Участник <select name="user_id" required></select></label>
+    <label>Сумма, ₽ <input name="amount" inputmode="decimal" required placeholder="350"></label>
+    <label>Категория <select name="category" required></select></label>
+    <label>Дата <input name="spent_at" type="date" required></label>
+    <label>Комментарий <input name="comment" maxlength="500" placeholder="кофе"></label>
+    <p class="error" id="form-error" role="alert"></p>
+    <div class="actions">
+      <button type="button" id="cancel">Отмена</button>
+      <button class="primary" type="submit">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const PAGE = 50;
+const FILTERS = [['user_id', 'f-user'], ['from', 'f-from'], ['to', 'f-to'], ['category', 'f-category']];
+const $ = (id) => document.getElementById(id);
+const rub = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 });
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDate = (d) => d.split('-').reverse().join('.');
+const today = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD в поясе браузера
+
+let items = [], users = [], editing = null;
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data;
+}
+
+async function load(append = false) {
+  $('error').textContent = '';
+  const params = new URLSearchParams({ limit: PAGE, offset: append ? items.length : 0 });
+  for (const [key, id] of FILTERS) if ($(id).value) params.set(key, $(id).value);
+  try {
+    const data = await api('GET', '/api/expenses?' + params);
+    items = append ? items.concat(data.items) : data.items;
+    render(data.summary);
+  } catch (e) { $('error').textContent = e.message; }
+}
+
+function render(summary) {
+  $('rows').innerHTML = items.map((e) => `
+    <tr>
+      <td>${fmtDate(e.spent_at)}</td>
+      <td>${esc(e.user_name)}</td>
+      <td><span class="tag">${esc(e.category)}</span></td>
+      <td class="amount">${rub.format(e.amount)}</td>
+      <td class="comment">${esc(e.comment)}</td>
+      <td><button class="link" data-edit="${e.id}">Изменить</button><button class="link danger" data-delete="${e.id}">Удалить</button></td>
+    </tr>`).join('');
+  $('empty').hidden = items.length > 0;
+  $('more').hidden = items.length >= summary.count;
+  const cats = Object.entries(summary.by_category).sort((a, b) => b[1] - a[1])
+    .map(([c, m]) => `${esc(c)} ${rub.format(m)}`).join(' · ');
+  $('summary').innerHTML = `<span>Трат: <b>${summary.count}</b></span><span>Сумма: <b>${rub.format(summary.total)}</b></span>${cats ? `<span>${cats}</span>` : ''}`;
+}
+
+function openForm(e) {
+  editing = e || null;
+  const f = $('form');
+  $('form-title').textContent = e ? 'Изменить трату' : 'Новая трата';
+  $('form-error').textContent = '';
+  f.user_id.value = e ? e.user_id : ($('f-user').value || users[0].id);
+  f.amount.value = e ? e.amount : '';
+  f.category.value = e ? e.category : 'еда';
+  f.spent_at.value = e ? e.spent_at : today();
+  f.spent_at.max = today();
+  f.comment.value = e ? e.comment : '';
+  $('dialog').showModal();
+  f.amount.focus();
+}
+
+$('form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const body = {
+    user_id: Number(f.user_id.value), amount: f.amount.value, category: f.category.value,
+    spent_at: f.spent_at.value, comment: f.comment.value,
+  };
+  try {
+    if (editing) await api('PATCH', `/api/expenses/${editing.id}`, body);
+    else await api('POST', '/api/expenses', body);
+    $('dialog').close();
+    load();
+  } catch (e) { $('form-error').textContent = e.message; }
+});
+
+$('rows').addEventListener('click', async (ev) => {
+  const { edit, delete: del } = ev.target.dataset;
+  const e = items.find((x) => x.id === Number(edit || del));
+  if (!e) return;
+  if (edit) return openForm(e);
+  if (!confirm(`Удалить «${e.comment || e.category}» на ${rub.format(e.amount)}?`)) return;
+  try { await api('DELETE', `/api/expenses/${e.id}`); load(); } catch (err) { $('error').textContent = err.message; }
+});
+
+$('add').addEventListener('click', () => {
+  if (users.length) openForm();
+  else $('error').textContent = 'В семье пока нет участников: задайте FAMILY_MEMBERS или напишите боту.';
+});
+$('cancel').addEventListener('click', () => $('dialog').close());
+$('more-btn').addEventListener('click', () => load(true));
+$('reset').addEventListener('click', () => { for (const [, id] of FILTERS) $(id).value = ''; load(); });
+for (const [, id] of FILTERS) $(id).addEventListener('change', () => load());
+
+(async () => {
+  try {
+    const [u, cats] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/categories')]);
+    users = u;
+    const userOpts = users.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+    const catOpts = cats.map((c) => `<option>${esc(c)}</option>`).join('');
+    $('f-user').insertAdjacentHTML('beforeend', userOpts);
+    $('f-category').insertAdjacentHTML('beforeend', catOpts);
+    $('form').user_id.innerHTML = userOpts;
+    $('form').category.innerHTML = catOpts;
+  } catch (e) { $('error').textContent = e.message; }
+  load();
+})();
+</script>
+</body>
+</html>
