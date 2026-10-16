@@ -14,7 +14,10 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 h1 { font-size: 22px; margin: 0; }
 header p { margin: 2px 0 0; color: var(--muted); }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
-.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; padding: 16px; margin-bottom: 16px; align-items: end; }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 16px; margin-bottom: 16px; align-items: end; }
+.presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.presets button { min-height: 32px; padding: 4px 12px; font-size: 14px; }
+.presets button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 38px; }
 button { font: inherit; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; min-height: 38px; }
@@ -42,6 +45,20 @@ dialog::backdrop { background: rgb(0 0 0 / .4); }
 dialog form { display: grid; gap: 12px; }
 dialog h2 { margin: 0 0 4px; font-size: 18px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* Phone: each row becomes two lines — what and how much, then when / who / category. */
+@media (max-width: 640px) {
+  thead { display: none; }
+  table, tbody { display: block; }
+  tbody tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { display: block; padding: 0; border: none; }
+  td.comment { order: 1; flex: 1 1 60%; min-width: 0; font-weight: 500; }
+  td.amount { order: 2; font-weight: 600; }
+  td.date { order: 3; font-size: 13px; color: var(--muted); }
+  td.user { order: 4; font-size: 13px; color: var(--muted); }
+  td.cat { order: 5; }
+  td.row-actions { order: 6; margin-left: auto; }
+}
 </style>
 </head>
 <body>
@@ -52,10 +69,18 @@ dialog h2 { margin: 0 0 4px; font-size: 18px; }
   </header>
 
   <section class="card filters" aria-label="Фильтры">
+    <div class="presets" role="group" aria-label="Период">
+      <button data-preset="today" aria-pressed="false">Сегодня</button>
+      <button data-preset="week" aria-pressed="false">7 дней</button>
+      <button data-preset="month" aria-pressed="false">Этот месяц</button>
+      <button data-preset="prev" aria-pressed="false">Прошлый месяц</button>
+      <button data-preset="all" aria-pressed="true">Всё время</button>
+    </div>
     <label>Участник <select id="f-user"><option value="">Все</option></select></label>
     <label>С <input type="date" id="f-from"></label>
     <label>По <input type="date" id="f-to"></label>
     <label>Категория <select id="f-category"><option value="">Все</option></select></label>
+    <label>Поиск <input type="search" id="f-text" placeholder="такси"></label>
     <button id="reset">Сбросить</button>
   </section>
 
@@ -67,7 +92,7 @@ dialog h2 { margin: 0 0 4px; font-size: 18px; }
       <thead><tr><th>Дата</th><th>Участник</th><th>Категория</th><th class="amount">Сумма</th><th>Комментарий</th><th><span class="visually-hidden">Действия</span></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
-    <div class="empty" id="empty" hidden>Трат нет. Напишите боту «кофе 350» или добавьте трату здесь.</div>
+    <div class="empty" id="empty" hidden></div>
     <div class="more" id="more" hidden><button id="more-btn">Показать ещё</button></div>
   </section>
 </main>
@@ -90,12 +115,26 @@ dialog h2 { margin: 0 0 4px; font-size: 18px; }
 
 <script>
 const PAGE = 50;
-const FILTERS = [['user_id', 'f-user'], ['from', 'f-from'], ['to', 'f-to'], ['category', 'f-category']];
+const FILTERS = [['user_id', 'f-user'], ['from', 'f-from'], ['to', 'f-to'], ['category', 'f-category'], ['text', 'f-text']];
 const $ = (id) => document.getElementById(id);
 const rub = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtDate = (d) => d.split('-').reverse().join('.');
-const today = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD в поясе браузера
+const iso = (d) => d.toLocaleDateString('sv-SE'); // YYYY-MM-DD в поясе браузера
+const today = () => iso(new Date());
+
+// Те же периоды, что понимает бот: 7 дней включая сегодня, месяц — с 1-го числа.
+const PRESETS = {
+  today: () => [today(), today()],
+  week: () => { const d = new Date(); d.setDate(d.getDate() - 6); return [iso(d), today()]; },
+  month: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth(), 1)), today()]; },
+  prev: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)), iso(new Date(d.getFullYear(), d.getMonth(), 0))]; },
+  all: () => ['', ''],
+};
+
+function pressPreset(name) {
+  for (const b of document.querySelectorAll('[data-preset]')) b.setAttribute('aria-pressed', String(b.dataset.preset === name));
+}
 
 let items = [], users = [], editing = null;
 
@@ -125,19 +164,24 @@ async function load(append = false) {
 function render(summary) {
   $('rows').innerHTML = items.map((e) => `
     <tr>
-      <td>${fmtDate(e.spent_at)}</td>
-      <td>${esc(e.user_name)}</td>
-      <td><span class="tag">${esc(e.category)}</span></td>
+      <td class="date">${fmtDate(e.spent_at)}</td>
+      <td class="user">${esc(e.user_name)}</td>
+      <td class="cat"><span class="tag">${esc(e.category)}</span></td>
       <td class="amount">${rub.format(e.amount)}</td>
       <td class="comment">${esc(e.comment)}</td>
-      <td><button class="link" data-edit="${e.id}">Изменить</button><button class="link danger" data-delete="${e.id}">Удалить</button></td>
+      <td class="row-actions"><button class="link" data-edit="${e.id}" aria-label="Изменить: ${esc(label(e))}">Изменить</button><button class="link danger" data-delete="${e.id}" aria-label="Удалить: ${esc(label(e))}">Удалить</button></td>
     </tr>`).join('');
   $('empty').hidden = items.length > 0;
+  $('empty').textContent = FILTERS.some(([, id]) => $(id).value)
+    ? 'По этим фильтрам ничего не найдено.'
+    : 'Трат нет. Напишите боту «кофе 350» или добавьте трату здесь.';
   $('more').hidden = items.length >= summary.count;
   const cats = Object.entries(summary.by_category).sort((a, b) => b[1] - a[1])
     .map(([c, m]) => `${esc(c)} ${rub.format(m)}`).join(' · ');
   $('summary').innerHTML = `<span>Трат: <b>${summary.count}</b></span><span>Сумма: <b>${rub.format(summary.total)}</b></span>${cats ? `<span>${cats}</span>` : ''}`;
 }
+
+const label = (e) => `${e.comment || e.category}, ${rub.format(e.amount)}, ${fmtDate(e.spent_at)}`;
 
 function openForm(e) {
   editing = e || null;
@@ -184,8 +228,18 @@ $('add').addEventListener('click', () => {
 });
 $('cancel').addEventListener('click', () => $('dialog').close());
 $('more-btn').addEventListener('click', () => load(true));
-$('reset').addEventListener('click', () => { for (const [, id] of FILTERS) $(id).value = ''; load(); });
-for (const [, id] of FILTERS) $(id).addEventListener('change', () => load());
+$('reset').addEventListener('click', () => { for (const [, id] of FILTERS) $(id).value = ''; pressPreset('all'); load(); });
+for (const id of ['f-user', 'f-category']) $(id).addEventListener('change', () => load());
+for (const id of ['f-from', 'f-to']) $(id).addEventListener('change', () => { pressPreset(null); load(); });
+let searchTimer;
+$('f-text').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 300); });
+for (const b of document.querySelectorAll('[data-preset]')) {
+  b.addEventListener('click', () => {
+    [$('f-from').value, $('f-to').value] = PRESETS[b.dataset.preset]();
+    pressPreset(b.dataset.preset);
+    load();
+  });
+}
 
 (async () => {
   try {
