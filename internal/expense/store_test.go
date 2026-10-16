@@ -180,6 +180,35 @@ func TestMessagesDedupeAndHistory(t *testing.T) {
 	}
 }
 
+func TestListLimitIsCapped(t *testing.T) {
+	f := setup(t)
+	s := f.db.ForUser(f.alice)
+	for range 60 {
+		mustCreate(t, s, expense.Input{Amount: 100, Category: "еда", SpentAt: today})
+	}
+	ctx := context.Background()
+	if items, _ := s.List(ctx, expense.Filter{Limit: 500}); len(items) != 60 {
+		t.Errorf("limit 500 returned %d, want all 60 (capped at 200, not reset to the default)", len(items))
+	}
+	if items, _ := s.List(ctx, expense.Filter{}); len(items) != 50 {
+		t.Errorf("default limit returned %d, want 50", len(items))
+	}
+}
+
+func TestPruneMessages(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, _, err := f.db.SaveMessage(ctx, f.alice.ID, nil, expense.Message{Role: "user", Content: "кофе 350"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := f.db.PruneMessages(ctx, time.Now().Add(-time.Hour)); err != nil || n != 0 {
+		t.Errorf("pruned a fresh message: n=%d err=%v", n, err)
+	}
+	if n, err := f.db.PruneMessages(ctx, time.Now().Add(time.Minute)); err != nil || n != 1 {
+		t.Errorf("old message not pruned: n=%d err=%v", n, err)
+	}
+}
+
 func TestLockUserSerializes(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()

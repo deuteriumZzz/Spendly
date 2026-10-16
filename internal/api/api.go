@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"spendly/internal/expense"
@@ -22,10 +25,11 @@ type Server struct {
 	db       *expense.DB
 	familyID int64
 	loc      *time.Location
+	hosts    []string // domain names the panel may be opened under, besides localhost and IPs
 }
 
-func New(db *expense.DB, familyID int64, loc *time.Location) *Server {
-	return &Server{db: db, familyID: familyID, loc: loc}
+func New(db *expense.DB, familyID int64, loc *time.Location, hosts []string) *Server {
+	return &Server{db: db, familyID: familyID, loc: loc, hosts: hosts}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -48,7 +52,38 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.Handle("GET /", http.FileServerFS(web.FS))
-	return logRequests(mux)
+	// The panel has no auth (per spec), so other sites must not be able to use
+	// the visitor's browser against it: CSRF, DNS rebinding, clickjacking.
+	return logRequests(securityHeaders(s.checkHost(http.NewCrossOriginProtection().Handler(mux))))
+}
+
+// checkHost blocks DNS rebinding: an attacker's domain resolved to 127.0.0.1
+// would otherwise be same-origin with the panel and could read every expense.
+// localhost and IP literals cannot be rebound; other names must be listed in PANEL_HOSTS.
+func (s *Server) checkHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.ToLower(strings.Trim(host, "[]"))
+		if host == "localhost" || net.ParseIP(host) != nil || slices.Contains(s.hosts, host) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "unknown host "+host+": add it to PANEL_HOSTS", http.StatusMisdirectedRequest)
+	})
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) store() *expense.Store { return s.db.ForFamily(s.familyID) }
@@ -257,10 +292,14 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
+// Swagger UI runs on the panel's origin, so the CDN files are pinned by hash:
+// a tampered file is refused by the browser instead of reading the API.
 const swaggerPage = `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>Spendly API</title>
-<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css"></head>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css"
+  integrity="sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn" crossorigin="anonymous"></head>
 <body><div id="ui"></div>
-<script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+<script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"
+  integrity="sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep" crossorigin="anonymous"></script>
 <script>SwaggerUIBundle({url: "/api/openapi.yaml", dom_id: "#ui"});</script>
 </body></html>`

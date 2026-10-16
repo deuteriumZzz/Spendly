@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,15 +14,20 @@ import (
 )
 
 // fakeLLM replays scripted replies and records what the agent sent.
+// When the script runs out it returns fail, or fails the test if fail is nil.
 type fakeLLM struct {
 	t       *testing.T
 	replies []Message
+	fail    error
 	sent    [][]Message
 }
 
 func (f *fakeLLM) Chat(_ context.Context, msgs []Message, _ []Tool) (Message, error) {
 	f.sent = append(f.sent, slices.Clone(msgs))
 	if len(f.replies) == 0 {
+		if f.fail != nil {
+			return Message{}, f.fail
+		}
 		f.t.Fatal("unexpected LLM call")
 	}
 	r := f.replies[0]
@@ -174,6 +180,25 @@ func TestStepLimitStopsLoop(t *testing.T) {
 	reply, err := a.Reply(context.Background(), f.db.ForUser(f.alice), nil, "???")
 	if err != nil || reply != fallbackReply {
 		t.Errorf("reply = %q, %v; want fallback", reply, err)
+	}
+}
+
+// If the LLM dies after a change, the user must learn what was changed,
+// otherwise they repeat the message and the expense is duplicated.
+func TestFailureAfterChangeReportsIt(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	llm := &fakeLLM{t: t, fail: errors.New("llm down"), replies: []Message{
+		call("add_expense", `{"amount": 350, "category": "еда", "spent_at": "2026-10-16", "comment": "кофе"}`),
+	}}
+	reply, err := newAgent(llm).Reply(ctx, f.db.ForUser(f.alice), nil, "кофе 350")
+	if err == nil || !strings.Contains(reply, "записано: кофе — 350.00 ₽") {
+		t.Errorf("reply %q, err %v; want the change listed and the error returned", reply, err)
+	}
+
+	untouched := &fakeLLM{t: t, fail: errors.New("llm down")}
+	if reply, err := newAgent(untouched).Reply(ctx, f.db.ForUser(f.alice), nil, "кофе 350"); err == nil || reply != "" {
+		t.Errorf("failure before any change: reply %q, err %v; want empty reply and an error", reply, err)
 	}
 }
 

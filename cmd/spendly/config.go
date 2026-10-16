@@ -18,6 +18,7 @@ type config struct {
 	LLMAPIKey      string
 	LLMModel       string
 	Members        map[int64]string
+	PanelHosts     []string
 	SeedDemo       bool
 	MaxConcurrency int
 	RatePerHour    int
@@ -47,6 +48,13 @@ func loadConfig() (config, error) {
 	}
 	if c.MaxConcurrency, err = intEnv("MAX_CONCURRENCY", 8); err != nil {
 		errs = append(errs, err)
+	} else if c.MaxConcurrency > 100 {
+		errs = append(errs, errors.New("MAX_CONCURRENCY: at most 100 (each message may hold two DB connections)"))
+	}
+	for _, h := range strings.Split(os.Getenv("PANEL_HOSTS"), ",") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			c.PanelHosts = append(c.PanelHosts, h)
+		}
 	}
 	if c.RatePerHour, err = intEnv("RATE_LIMIT_PER_HOUR", 60); err != nil {
 		errs = append(errs, err)

@@ -490,7 +490,7 @@ func writeReport(t *testing.T, model string, results []evalResult) {
 			r.n, r.c.msg, r.err, strings.ReplaceAll(r.run.reply, "\n", " "), formatCalls(r.run.calls))
 	}
 
-	if err := os.WriteFile("../../docs/eval-results.md", []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile("../../docs/eval-results.md", []byte(b.String()), 0o644); err != nil { //nolint:gosec // a repo doc, readable on purpose
 		t.Errorf("write report: %v", err)
 		return
 	}

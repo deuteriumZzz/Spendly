@@ -4,6 +4,8 @@ run:
   build-tags: [eval]
 
 linters:
+  enable:
+    - gosec
   exclusions:
     presets:
       - std-error-handling # unchecked Close in defer and the like

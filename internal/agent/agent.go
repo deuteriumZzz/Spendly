@@ -27,6 +27,10 @@ const fallbackReply = "Не получилось разобрать запрос
 
 // Reply answers one message. store must be scoped to its author (db.ForUser):
 // it is the agent's only way to reach data, and no tool takes a user id.
+//
+// If it fails after changing data, it returns both an error and a reply listing
+// the changes: telling the user only «не получилось» would make them repeat
+// the message and duplicate the expense.
 func (a *Agent) Reply(ctx context.Context, store *expense.Store, history []expense.Message, text string) (string, error) {
 	now := a.now().In(a.loc)
 	today := now.Format(time.DateOnly)
@@ -37,10 +41,11 @@ func (a *Agent) Reply(ctx context.Context, store *expense.Store, history []expen
 	}
 	msgs = append(msgs, Message{Role: "user", Content: text})
 
+	var changes []string
 	for range a.maxSteps {
 		resp, err := a.llm.Chat(ctx, msgs, tools)
 		if err != nil {
-			return "", err
+			return partialReply(changes), err
 		}
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Content) == "" {
@@ -50,16 +55,30 @@ func (a *Agent) Reply(ctx context.Context, store *expense.Store, history []expen
 		}
 		msgs = append(msgs, Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
 		for _, call := range resp.ToolCalls {
-			out, err := runTool(ctx, store, today, call)
+			out, change, err := runTool(ctx, store, today, call)
 			if err != nil {
-				return "", err
+				return partialReply(changes), err
+			}
+			if change != "" {
+				changes = append(changes, change)
 			}
 			slog.Debug("tool", "name", call.Function.Name, "args", call.Function.Arguments, "result", out)
 			msgs = append(msgs, Message{Role: "tool", ToolCallID: call.ID, Content: out})
 		}
 	}
 	slog.Warn("agent step limit reached", "steps", a.maxSteps)
+	if len(changes) > 0 {
+		return partialReply(changes), nil
+	}
 	return fallbackReply, nil
+}
+
+func partialReply(changes []string) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	return "Сделано:\n• " + strings.Join(changes, "\n• ") +
+		"\nОтвет не удалось сформировать до конца — проверь траты, прежде чем повторять сообщение."
 }
 
 var weekdays = [...]string{"воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"}

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -33,10 +34,51 @@ type Bot struct {
 	agent *agent.Agent
 	cfg   Config
 	sem   chan struct{} // bounds concurrent LLM work, and with it DB connections
+	queue userQueue
 }
 
 func New(db *expense.DB, a *agent.Agent, cfg Config) *Bot {
-	return &Bot{db: db, agent: a, cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrency)}
+	return &Bot{db: db, agent: a, cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrency),
+		queue: userQueue{m: map[int64]*userSlot{}}}
+}
+
+// userQueue lines up one user's messages inside this process before they take
+// a semaphore slot: otherwise a burst from one user fills every slot with
+// messages waiting for that user's lock, and the rest of the family waits too.
+type userQueue struct {
+	mu sync.Mutex
+	m  map[int64]*userSlot
+}
+
+type userSlot struct {
+	turn    chan struct{}
+	waiting int
+}
+
+func (q *userQueue) enter(ctx context.Context, userID int64) (leave func(), ok bool) {
+	q.mu.Lock()
+	s := q.m[userID]
+	if s == nil {
+		s = &userSlot{turn: make(chan struct{}, 1)}
+		q.m[userID] = s
+	}
+	s.waiting++
+	q.mu.Unlock()
+
+	done := func() {
+		q.mu.Lock()
+		if s.waiting--; s.waiting == 0 {
+			delete(q.m, userID)
+		}
+		q.mu.Unlock()
+	}
+	select {
+	case s.turn <- struct{}{}:
+		return func() { <-s.turn; done() }, true
+	case <-ctx.Done():
+		done()
+		return nil, false
+	}
 }
 
 const (
@@ -119,8 +161,14 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 		return b.fail("resolve user", msg.From.ID, err)
 	}
 
-	// Semaphore first, then the per-user lock: at most MaxConcurrency messages
-	// hold a lock connection, so the pool cannot be exhausted by waiters.
+	// Order matters: the user's queue (free to wait in), then a semaphore slot,
+	// then the cross-replica advisory lock. At most MaxConcurrency messages hold
+	// a lock connection, and one user's burst cannot take every slot.
+	leave, ok := b.queue.enter(ctx, user.ID)
+	if !ok {
+		return ""
+	}
+	defer leave()
 	select {
 	case b.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -156,7 +204,11 @@ func (b *Bot) Process(ctx context.Context, updateID int64, msg *models.Message, 
 	reply, err := b.agent.Reply(actx, b.db.ForUser(user), history, text)
 	stopTyping()
 	if err != nil {
-		return b.fail("agent", user.ID, err)
+		if reply == "" {
+			return b.fail("agent", user.ID, err)
+		}
+		// Data already changed: the reply lists what, so the user doesn't repeat it.
+		slog.Error("bot: agent failed after changes", "user", user.ID, "err", err)
 	}
 	reply = clip(reply)
 	if _, _, err := b.db.SaveMessage(ctx, user.ID, nil, expense.Message{Role: "assistant", Content: reply}); err != nil {

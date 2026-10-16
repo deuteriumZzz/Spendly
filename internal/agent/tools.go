@@ -98,24 +98,30 @@ type listResult struct {
 	TotalAmount expense.Money     `json:"total_amount"`
 }
 
+var changeVerbs = map[string]string{"add_expense": "записано", "update_expense": "изменено", "delete_expense": "удалено"}
+
 // runTool executes one tool call. Bad arguments and missing expenses go back
 // to the model as {"error": ...} so it can ask the user; other errors abort the reply.
-func runTool(ctx context.Context, s *expense.Store, today string, call ToolCall) (string, error) {
+// change describes a successful add/update/delete for the user, "" otherwise.
+func runTool(ctx context.Context, s *expense.Store, today string, call ToolCall) (out, change string, err error) {
 	result, err := execTool(ctx, s, today, call.Function.Name, call.Function.Arguments)
 	var verr *expense.ValidationError
 	switch {
 	case errors.As(err, &verr):
-		return errorJSON(verr.Error()), nil
+		return errorJSON(verr.Error()), "", nil
 	case errors.Is(err, expense.ErrNotFound):
-		return errorJSON("трата с таким id не найдена среди трат пользователя"), nil
+		return errorJSON("трата с таким id не найдена среди трат пользователя"), "", nil
 	case err != nil:
-		return "", fmt.Errorf("tool %s: %w", call.Function.Name, err)
+		return "", "", fmt.Errorf("tool %s: %w", call.Function.Name, err)
+	}
+	if e, ok := result.(expense.Expense); ok {
+		change = fmt.Sprintf("%s: %s — %s ₽, %s, %s", changeVerbs[call.Function.Name], e.Comment, e.Amount, e.Category, e.SpentAt)
 	}
 	b, err := json.Marshal(result)
 	if err != nil {
-		return "", fmt.Errorf("encode tool result: %w", err)
+		return "", change, fmt.Errorf("encode tool result: %w", err)
 	}
-	return string(b), nil
+	return string(b), change, nil
 }
 
 func execTool(ctx context.Context, s *expense.Store, today, name, args string) (any, error) {

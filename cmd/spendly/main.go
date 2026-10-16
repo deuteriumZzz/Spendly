@@ -78,7 +78,7 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	// Each bot message may hold a lock connection plus a query connection.
-	pool, err := connect(ctx, cfg.DatabaseURL, int32(2*cfg.MaxConcurrency+8))
+	pool, err := connect(ctx, cfg.DatabaseURL, int32(2*cfg.MaxConcurrency+8)) //nolint:gosec // MaxConcurrency ≤ 100, checked in loadConfig
 	if err != nil {
 		return err
 	}
@@ -96,9 +96,11 @@ func serve(ctx context.Context) error {
 		}
 	}
 
+	go pruneMessages(ctx, db)
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           api.New(db, expense.DefaultFamilyID, cfg.Location).Handler(),
+		Handler:           api.New(db, expense.DefaultFamilyID, cfg.Location, cfg.PanelHosts).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	httpErr := make(chan error, 1)
@@ -129,7 +131,10 @@ func serve(ctx context.Context) error {
 			return fmt.Errorf("telegram: %w", err)
 		}
 		go tg.Start(ctx)
-		slog.Info("telegram bot started (long polling)", "model", cfg.LLMModel, "open_mode", len(cfg.Members) == 0)
+		slog.Info("telegram bot started (long polling)", "model", cfg.LLMModel)
+		if len(cfg.Members) == 0 {
+			slog.Warn("FAMILY_MEMBERS is empty: open mode, anyone who finds the bot joins the family and uses the LLM budget")
+		}
 	}
 
 	select {
@@ -141,6 +146,29 @@ func serve(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// messageRetention bounds how long chat texts are stored. They are needed for
+// 6 h of dialog context, 1 h of rate limiting and about a day of redelivery dedupe.
+const messageRetention = 7 * 24 * time.Hour
+
+// pruneMessages runs hourly; with several replicas each one prunes, which is harmless.
+func pruneMessages(ctx context.Context, db *expense.DB) {
+	tick := time.NewTicker(time.Hour)
+	defer tick.Stop()
+	for {
+		n, err := db.PruneMessages(ctx, time.Now().Add(-messageRetention))
+		if err != nil && ctx.Err() == nil {
+			slog.Error("prune messages", "err", err)
+		} else if n > 0 {
+			slog.Info("pruned old messages", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 // connect waits for Postgres to come up (up to ~30 s) instead of failing on

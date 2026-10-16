@@ -2,6 +2,8 @@ package bot
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +23,28 @@ func (e *echoLLM) Chat(_ context.Context, msgs []agent.Message, _ []agent.Tool) 
 	return agent.Message{Role: "assistant", Content: "ответ на: " + msgs[len(msgs)-1].Content}, nil
 }
 
+// flakyLLM records an expense, then fails — like a provider outage mid-dialog.
+type flakyLLM struct{ calls int }
+
+func (f *flakyLLM) Chat(_ context.Context, _ []agent.Message, _ []agent.Tool) (agent.Message, error) {
+	f.calls++
+	if f.calls > 1 {
+		return agent.Message{}, errors.New("llm down")
+	}
+	args := `{"amount": 350, "category": "еда", "spent_at": "` + time.Now().UTC().Format(time.DateOnly) + `", "comment": "кофе"}`
+	return agent.Message{Role: "assistant", ToolCalls: []agent.ToolCall{
+		{ID: "c1", Type: "function", Function: agent.FunctionCall{Name: "add_expense", Arguments: args}},
+	}}, nil
+}
+
 func newBot(t *testing.T, cfg Config) (*Bot, *echoLLM, *expense.DB) {
-	db := expense.NewDB(testdb.New(t))
 	llm := &echoLLM{}
+	b, db := newBotWith(t, cfg, llm)
+	return b, llm, db
+}
+
+func newBotWith(t *testing.T, cfg Config, llm agent.LLM) (*Bot, *expense.DB) {
+	db := expense.NewDB(testdb.New(t))
 	cfg.FamilyID = expense.DefaultFamilyID
 	cfg.MaxConcurrency = 2
 	cfg.HistorySize = 10
@@ -31,7 +52,7 @@ func newBot(t *testing.T, cfg Config) (*Bot, *echoLLM, *expense.DB) {
 	if cfg.RatePerHour == 0 {
 		cfg.RatePerHour = 60
 	}
-	return New(db, agent.New(llm, time.UTC), cfg), llm, db
+	return New(db, agent.New(llm, time.UTC), cfg), db
 }
 
 func private(text string) *models.Message {
@@ -120,6 +141,61 @@ func TestProcessRateLimit(t *testing.T) {
 	b.Process(ctx, 1, private("кофе 350"), noTyping)
 	if got := b.Process(ctx, 2, private("чай 100"), noTyping); got != rateLimited || llm.calls != 1 {
 		t.Errorf("second message: reply %q, llm calls %d", got, llm.calls)
+	}
+}
+
+func TestProcessReportsChangesWhenAgentFails(t *testing.T) {
+	b, db := newBotWith(t, Config{}, &flakyLLM{})
+	ctx := context.Background()
+	got := b.Process(ctx, 1, private("кофе 350"), noTyping)
+	if !strings.Contains(got, "Сделано") || !strings.Contains(got, "кофе") {
+		t.Fatalf("reply = %q, want the recorded expense listed", got)
+	}
+	// The partial reply is in the history, so the next turn knows the expense exists.
+	hist, _ := db.History(ctx, 101, 1<<62, 10)
+	if len(hist) != 2 || hist[1].Role != "assistant" || !strings.Contains(hist[1].Content, "кофе") {
+		t.Errorf("history = %+v", hist)
+	}
+}
+
+// blockingLLM hangs on Alice's messages until release is closed and answers
+// everyone else at once.
+type blockingLLM struct{ release chan struct{} }
+
+func (l *blockingLLM) Chat(ctx context.Context, msgs []agent.Message, _ []agent.Tool) (agent.Message, error) {
+	if strings.HasPrefix(msgs[len(msgs)-1].Content, "алиса") {
+		select {
+		case <-l.release:
+		case <-ctx.Done():
+			return agent.Message{}, ctx.Err()
+		}
+	}
+	return agent.Message{Role: "assistant", Content: "ok"}, nil
+}
+
+// A burst from one user must not take every slot and stall the rest of the family.
+func TestOneUsersBurstDoesNotBlockOthers(t *testing.T) {
+	llm := &blockingLLM{release: make(chan struct{})}
+	b, _ := newBotWith(t, Config{}, llm) // MaxConcurrency = 2
+	defer close(llm.release)
+	ctx := context.Background()
+
+	for i := range 4 {
+		go b.Process(ctx, int64(100+i), private("алиса "+strconv.Itoa(i)), noTyping)
+	}
+	time.Sleep(300 * time.Millisecond) // let Alice's messages queue up
+
+	bob := private("кофе 350")
+	bob.From.ID, bob.Chat.ID = 202, 202
+	got := make(chan string, 1)
+	go func() { got <- b.Process(ctx, 200, bob, noTyping) }()
+	select {
+	case reply := <-got:
+		if reply != "ok" {
+			t.Errorf("bob's reply = %q", reply)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("bob is stuck behind alice's burst")
 	}
 }
 

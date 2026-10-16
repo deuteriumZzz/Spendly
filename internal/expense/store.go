@@ -108,9 +108,10 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Expense, error) {
 		order = "e.created_at DESC, e.id DESC"
 	}
 	limit := f.Limit
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
 	}
+	limit = min(limit, 200)
 	sql := fmt.Sprintf(`SELECT %s FROM expenses e JOIN users u ON u.telegram_id = e.user_id
 		WHERE %s ORDER BY %s LIMIT %d OFFSET %d`, selectCols, where, order, limit, max(f.Offset, 0))
 
@@ -331,6 +332,16 @@ func (db *DB) History(ctx context.Context, userID, beforeID int64, n int) ([]Mes
 	}
 	slices.Reverse(msgs)
 	return msgs, nil
+}
+
+// PruneMessages deletes dialog messages older than before: chat texts are
+// personal data and are needed only for a few hours of context.
+func (db *DB) PruneMessages(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := db.pool.Exec(ctx, `DELETE FROM messages WHERE created_at < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("prune messages: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // CountUserMessages counts incoming messages since t — the per-user rate limit.
