@@ -16,7 +16,7 @@ type config struct {
 	TelegramToken  string
 	LLMBaseURL     string
 	LLMAPIKey      string
-	LLMModel       string
+	LLMModels      []string
 	Members        map[int64]string
 	PanelHosts     []string
 	SeedDemo       bool
@@ -32,14 +32,15 @@ func loadConfig() (config, error) {
 		TelegramToken: os.Getenv("TELEGRAM_TOKEN"),
 		LLMBaseURL:    envOr("LLM_BASE_URL", "https://api.anthropic.com/v1/"),
 		LLMAPIKey:     os.Getenv("LLM_API_KEY"),
-		LLMModel:      os.Getenv("LLM_MODEL"),
+		LLMModels:     splitList(os.Getenv("LLM_MODEL")),
+		PanelHosts:    splitList(strings.ToLower(os.Getenv("PANEL_HOSTS"))),
 		SeedDemo:      os.Getenv("SEED_DEMO") == "true",
 	}
 	var errs []error
 	if c.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
 	}
-	if c.TelegramToken != "" && c.LLMModel == "" {
+	if c.TelegramToken != "" && len(c.LLMModels) == 0 {
 		errs = append(errs, errors.New("LLM_MODEL is required when TELEGRAM_TOKEN is set"))
 	}
 	var err error
@@ -50,11 +51,6 @@ func loadConfig() (config, error) {
 		errs = append(errs, err)
 	} else if c.MaxConcurrency > 100 {
 		errs = append(errs, errors.New("MAX_CONCURRENCY: at most 100 (each message may hold two DB connections)"))
-	}
-	for _, h := range strings.Split(os.Getenv("PANEL_HOSTS"), ",") {
-		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
-			c.PanelHosts = append(c.PanelHosts, h)
-		}
 	}
 	if c.RatePerHour, err = intEnv("RATE_LIMIT_PER_HOUR", 60); err != nil {
 		errs = append(errs, err)
@@ -82,6 +78,17 @@ func parseMembers(s string) (map[int64]string, error) {
 		members[id] = name
 	}
 	return members, nil
+}
+
+// splitList reads "a, b,c" and drops empty items.
+func splitList(s string) []string {
+	var out []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func envOr(key, def string) string {

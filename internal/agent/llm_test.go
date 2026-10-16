@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestClientRetriesAndParsesToolCalls(t *testing.T) {
@@ -38,7 +39,7 @@ func TestClientRetriesAndParsesToolCalls(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL + "/v1/", APIKey: "key", Model: "test-model", HTTP: srv.Client()}
+	c := &Client{BaseURL: srv.URL + "/v1/", APIKey: "key", Models: []string{"test-model"}, HTTP: srv.Client()}
 	msg, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "кофе 350"}}, tools)
 	if err != nil {
 		t.Fatal(err)
@@ -60,8 +61,52 @@ func TestClientDoesNotRetryBadRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL, Model: "x", HTTP: srv.Client()}
+	c := &Client{BaseURL: srv.URL, Models: []string{"x", "y"}, HTTP: srv.Client()}
 	if _, err := c.Chat(context.Background(), nil, tools); err == nil || attempts != 1 {
-		t.Errorf("err %v, attempts %d; want an error after one attempt", err, attempts)
+		t.Errorf("err %v, attempts %d; want an error after one attempt, no fallback", err, attempts)
+	}
+}
+
+func TestClientFallsBackToNextModel(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		hang      bool
+		mainCalls int
+	}{
+		{"overloaded", false, maxAttempts},
+		{"hangs", true, 1}, // a timeout is not retried: the reply deadline has no room for it
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := map[string]int{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Model string `json:"model"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				calls[body.Model]++
+				if body.Model == "main" {
+					if tc.hang {
+						<-r.Context().Done()
+						return
+					}
+					http.Error(w, "This model is currently experiencing high demand", http.StatusServiceUnavailable)
+					return
+				}
+				_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": "ok"}}]}`))
+			}))
+			defer srv.Close()
+
+			c := &Client{BaseURL: srv.URL, Models: []string{"main", "backup"}, HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
+			msgs := []Message{{Role: "user", Content: "кофе 350"}}
+			msg, err := c.Chat(context.Background(), msgs, tools)
+			if err != nil || msg.Content != "ok" || msg.Model != "backup" || calls["main"] != tc.mainCalls {
+				t.Fatalf("msg %+v, err %v, calls %v", msg, err, calls)
+			}
+			// The rest of the reply stays with the model that started it.
+			msgs = append(msgs, msg, Message{Role: "tool", ToolCallID: "c1", Content: "{}"})
+			if _, err := c.Chat(context.Background(), msgs, tools); err != nil || calls["main"] != tc.mainCalls || calls["backup"] != 2 {
+				t.Errorf("pinned call: err %v, calls %v", err, calls)
+			}
+		})
 	}
 }

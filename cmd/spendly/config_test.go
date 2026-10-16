@@ -1,6 +1,19 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
+
+func TestSplitList(t *testing.T) {
+	got := splitList(" gemini-3.6-flash, gemini-3.5-flash ,,")
+	if want := []string{"gemini-3.6-flash", "gemini-3.5-flash"}; !slices.Equal(got, want) {
+		t.Errorf("splitList = %q, want %q", got, want)
+	}
+	if got := splitList(""); len(got) != 0 {
+		t.Errorf("empty = %q", got)
+	}
+}
 
 func TestParseMembers(t *testing.T) {
 	got, err := parseMembers(" 123456:Мама , 789012: Папа ,")

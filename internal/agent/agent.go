@@ -53,7 +53,8 @@ func (a *Agent) Reply(ctx context.Context, store *expense.Store, history []Messa
 			}
 			return resp.Content, nil
 		}
-		msgs = append(msgs, Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
+		// Model pins the rest of this reply to the model that started it.
+		msgs = append(msgs, Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls, Model: resp.Model})
 		for _, call := range resp.ToolCalls {
 			out, change, err := runTool(ctx, store, today, call)
 			if err != nil {

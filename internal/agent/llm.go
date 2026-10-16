@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +20,8 @@ type Message struct {
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// Model that wrote this reply; set by Client, not sent over the wire.
+	Model string `json:"-"`
 }
 
 type ToolCall struct {
@@ -54,19 +58,49 @@ type LLM interface {
 type Client struct {
 	BaseURL string
 	APIKey  string
-	Model   string
+	Models  []string // the first one is the main model, the rest are fallbacks
 	HTTP    *http.Client
 }
 
 const maxAttempts = 3
 
-// Chat retries rate limits, 5xx and network errors with a short backoff.
+// Chat moves on to the next model when one stays overloaded or hangs.
+// A conversation that already has a reply from some model stays with it:
+// Gemini's thought signatures in the history are valid only for that model.
 func (c *Client) Chat(ctx context.Context, msgs []Message, tools []Tool) (Message, error) {
+	models := c.Models
+	for _, m := range msgs {
+		if m.Model != "" {
+			models = []string{m.Model}
+			break
+		}
+	}
+	var lastErr error
+	for i, model := range models {
+		if i > 0 {
+			slog.Warn("llm fallback", "from", models[i-1], "to", model, "err", lastErr)
+		}
+		msg, next, err := c.chat(ctx, model, msgs, tools)
+		if err == nil {
+			msg.Model = model
+			return msg, nil
+		}
+		lastErr = err
+		if !next || ctx.Err() != nil {
+			break
+		}
+	}
+	return Message{}, lastErr
+}
+
+// chat retries rate limits, 5xx and network errors with a short backoff.
+// next reports whether another model is worth a try.
+func (c *Client) chat(ctx context.Context, model string, msgs []Message, tools []Tool) (msg Message, next bool, err error) {
 	// No temperature: newer models (Claude Opus/Sonnet 5.5, OpenAI reasoning
 	// models) reject non-default sampling params; tool arguments are validated anyway.
-	body, err := json.Marshal(map[string]any{"model": c.Model, "messages": msgs, "tools": tools})
+	body, err := json.Marshal(map[string]any{"model": model, "messages": msgs, "tools": tools})
 	if err != nil {
-		return Message{}, fmt.Errorf("encode llm request: %w", err)
+		return Message{}, false, fmt.Errorf("encode llm request: %w", err)
 	}
 	var lastErr error
 	for attempt := range maxAttempts {
@@ -74,22 +108,27 @@ func (c *Client) Chat(ctx context.Context, msgs []Message, tools []Tool) (Messag
 			select {
 			case <-time.After(time.Duration(attempt) * time.Second):
 			case <-ctx.Done():
-				return Message{}, ctx.Err()
+				return Message{}, false, ctx.Err()
 			}
 		}
-		msg, retry, err := c.do(ctx, body)
+		msg, retry, err := c.do(ctx, model, body)
 		if err == nil {
-			return msg, nil
+			return msg, false, nil
 		}
 		lastErr = err
+		// A model that hung for the whole HTTP timeout will likely hang again,
+		// and the reply deadline has no room for a second wait.
+		if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
+			return Message{}, true, err
+		}
 		if !retry {
-			break
+			return Message{}, false, err
 		}
 	}
-	return Message{}, lastErr
+	return Message{}, true, lastErr
 }
 
-func (c *Client) do(ctx context.Context, body []byte) (msg Message, retry bool, err error) {
+func (c *Client) do(ctx context.Context, model string, body []byte) (msg Message, retry bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(c.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
@@ -128,7 +167,7 @@ func (c *Client) do(ctx context.Context, body []byte) (msg Message, retry bool, 
 		return Message{}, false, fmt.Errorf("unexpected llm response: %s", clip(raw))
 	}
 	msg = out.Choices[0].Message
-	slog.Info("llm", "model", c.Model, "dur", time.Since(start),
+	slog.Info("llm", "model", model, "dur", time.Since(start),
 		"prompt_tokens", out.Usage.PromptTokens, "completion_tokens", out.Usage.CompletionTokens,
 		"tool_calls", len(msg.ToolCalls))
 	return msg, false, nil

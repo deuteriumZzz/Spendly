@@ -156,15 +156,16 @@ type evalResult struct {
 }
 
 func TestEval(t *testing.T) {
-	model := os.Getenv("LLM_MODEL")
-	if model == "" {
+	// Only the main model: the report must name the model that actually answered.
+	model, _, _ := strings.Cut(os.Getenv("LLM_MODEL"), ",")
+	if model = strings.TrimSpace(model); model == "" {
 		t.Skip("LLM_MODEL не задана — eval пропущен")
 	}
 	baseURL := os.Getenv("LLM_BASE_URL")
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com/v1/"
 	}
-	llm := &Client{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY"), Model: model, HTTP: &http.Client{Timeout: 90 * time.Second}}
+	llm := &Client{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY"), Models: []string{model}, HTTP: &http.Client{Timeout: 90 * time.Second}}
 	db := expense.NewDB(testdb.New(t))
 
 	var (

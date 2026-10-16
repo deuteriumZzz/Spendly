@@ -106,7 +106,7 @@ func serve(ctx context.Context) error {
 		slog.Warn("TELEGRAM_TOKEN is not set: the bot is disabled, only the web panel is running")
 	} else {
 		llm := &agent.Client{
-			BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, Model: cfg.LLMModel,
+			BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, Models: cfg.LLMModels,
 			HTTP: &http.Client{Timeout: 60 * time.Second},
 		}
 		b := bot.New(db, dialogs, agent.New(llm, cfg.Location), bot.Config{
@@ -142,7 +142,7 @@ func serve(ctx context.Context) error {
 
 	if tg != nil {
 		go tg.Start(ctx)
-		slog.Info("telegram bot started (long polling)", "bot", "@"+botName, "model", cfg.LLMModel)
+		slog.Info("telegram bot started (long polling)", "bot", "@"+botName, "models", cfg.LLMModels)
 		if len(cfg.Members) == 0 {
 			slog.Warn("FAMILY_MEMBERS is empty: open mode, anyone who finds the bot joins the family and uses the LLM budget")
 		}
