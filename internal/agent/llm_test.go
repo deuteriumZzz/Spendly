@@ -21,7 +21,9 @@ func TestClientRetriesAndParsesToolCalls(t *testing.T) {
 			Tools []Tool `json:"tools"`
 		}
 		raw, _ := io.ReadAll(r.Body)
-		json.Unmarshal(raw, &body)
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("request body: %v", err)
+		}
 		if body.Model != "test-model" || len(body.Tools) != len(tools) {
 			t.Errorf("model %q, %d tools", body.Model, len(body.Tools))
 		}
@@ -29,7 +31,7 @@ func TestClientRetriesAndParsesToolCalls(t *testing.T) {
 			http.Error(w, "overloaded", http.StatusServiceUnavailable)
 			return
 		}
-		w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": null,
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": null,
 			"tool_calls": [{"id": "c1", "type": "function", "function": {"name": "add_expense", "arguments": "{\"amount\": 350}"}}]}}]}`))
 	}))
 	defer srv.Close()

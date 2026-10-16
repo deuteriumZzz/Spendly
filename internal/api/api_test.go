@@ -32,7 +32,7 @@ func TestExpensesCRUD(t *testing.T) {
 		}
 		defer res.Body.Close()
 		var out map[string]any
-		json.NewDecoder(res.Body).Decode(&out)
+		_ = json.NewDecoder(res.Body).Decode(&out) // 204 has no body; callers check the status
 		return res.StatusCode, out
 	}
 

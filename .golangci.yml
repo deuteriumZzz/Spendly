@@ -1,0 +1,9 @@
+version: "2"
+
+run:
+  build-tags: [eval]
+
+linters:
+  exclusions:
+    presets:
+      - std-error-handling # unchecked Close in defer and the like

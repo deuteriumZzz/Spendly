@@ -40,11 +40,11 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
-		w.Write(openapiSpec)
+		_, _ = w.Write(openapiSpec) // a failed write means the client is gone
 	})
 	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(swaggerPage))
+		_, _ = w.Write([]byte(swaggerPage))
 	})
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.Handle("GET /", http.FileServerFS(web.FS))

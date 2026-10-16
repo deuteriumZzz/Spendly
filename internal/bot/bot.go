@@ -74,7 +74,8 @@ func (b *Bot) Handle(ctx context.Context, tg *tgbot.Bot, upd *models.Update) {
 			tick := time.NewTicker(4 * time.Second)
 			defer tick.Stop()
 			for {
-				tg.SendChatAction(ctx, &tgbot.SendChatActionParams{ChatID: msg.Chat.ID, Action: models.ChatActionTyping})
+				// Cosmetic: a lost «печатает…» must not affect the reply.
+				_, _ = tg.SendChatAction(ctx, &tgbot.SendChatActionParams{ChatID: msg.Chat.ID, Action: models.ChatActionTyping})
 				select {
 				case <-ctx.Done():
 					return
