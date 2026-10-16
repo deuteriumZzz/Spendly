@@ -65,7 +65,7 @@ make up
 - Панель: **http://localhost:8080** — сразу с демо-семьёй.
 - Документация API: **http://localhost:8080/docs**.
 
-Для бота нужны два значения в `.env`: `TELEGRAM_TOKEN` от [@BotFather](https://t.me/BotFather) и `LLM_API_KEY`. По умолчанию — Claude (`claude-opus-5-5`); примеры для OpenAI, OpenRouter и Ollama — в [.env.example](.env.example). Без токена запускается только панель.
+Для бота нужны два значения в `.env`: `TELEGRAM_TOKEN` от [@BotFather](https://t.me/BotFather) и `LLM_API_KEY`. По умолчанию — Claude (`claude-opus-5-5`); примеры для OpenAI, OpenRouter, Gemini (есть бесплатный уровень) и Ollama — в [.env.example](.env.example). Без токена запускается только панель.
 
 <details>
 <summary><b>Как проверить за 5 минут</b></summary>

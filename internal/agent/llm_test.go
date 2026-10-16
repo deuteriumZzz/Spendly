@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -32,7 +33,8 @@ func TestClientRetriesAndParsesToolCalls(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": null,
-			"tool_calls": [{"id": "c1", "type": "function", "function": {"name": "add_expense", "arguments": "{\"amount\": 350}"}}]}}]}`))
+			"tool_calls": [{"id": "c1", "type": "function", "function": {"name": "add_expense", "arguments": "{\"amount\": 350}"},
+			"extra_content": {"google": {"thought_signature": "sig"}}}]}}]}`))
 	}))
 	defer srv.Close()
 
@@ -43,6 +45,10 @@ func TestClientRetriesAndParsesToolCalls(t *testing.T) {
 	}
 	if attempts != 2 || len(msg.ToolCalls) != 1 || msg.ToolCalls[0].Function.Name != "add_expense" {
 		t.Errorf("attempts %d, msg %+v", attempts, msg)
+	}
+	// The signature must go back to the model verbatim with the history.
+	if out, _ := json.Marshal(msg); !json.Valid(out) || !bytes.Contains(out, []byte(`"thought_signature":"sig"`)) {
+		t.Errorf("extra_content lost: %s", out)
 	}
 }
 
