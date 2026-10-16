@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Spendly">
+  <defs>
+    <linearGradient id="spendly-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1fb37e"/>
+      <stop offset="1" stop-color="#0a6b48"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#spendly-bg)"/>
+  <!-- chat bubble: you write to the bot -->
+  <rect x="11" y="13" width="42" height="31" rx="10" fill="#ffffff"/>
+  <path d="M17 38 L16 52 L30 42 Z" fill="#ffffff"/>
+  <!-- descending bars: and see where the money goes -->
+  <rect x="19" y="20.5" width="25" height="5" rx="2.5" fill="#0b7a53"/>
+  <rect x="19" y="28" width="17" height="5" rx="2.5" fill="#0b7a53" fill-opacity="0.7"/>
+  <rect x="19" y="35.5" width="9" height="5" rx="2.5" fill="#0b7a53" fill-opacity="0.45"/>
+</svg>

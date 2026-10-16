@@ -3,257 +3,146 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spendly — расходы семьи</title>
-<style>
-:root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --danger:#dc2626; --radius:10px; color-scheme: light dark; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#181b21; --text:#e6e8ec; --muted:#9aa3b2; --line:#2a2f38; --accent:#60a5fa; --danger:#f87171; } }
-* { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
-main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
-h1 { font-size: 22px; margin: 0; }
-header p { margin: 2px 0 0; color: var(--muted); }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
-.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 16px; margin-bottom: 16px; align-items: end; }
-.presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
-.presets button { min-height: 32px; padding: 4px 12px; font-size: 14px; }
-.presets button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 38px; }
-button { font: inherit; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; min-height: 38px; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.link { border: none; background: none; color: var(--accent); padding: 4px 6px; min-height: auto; }
-button.link.danger { color: var(--danger); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.summary { display: flex; gap: 8px 20px; flex-wrap: wrap; margin: 0 4px 12px; color: var(--muted); }
-.summary b { color: var(--text); }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { font-size: 13px; color: var(--muted); font-weight: 500; }
-td.amount, th.amount { text-align: right; font-variant-numeric: tabular-nums; }
-td.comment { white-space: normal; min-width: 160px; }
-tbody tr:last-child td { border-bottom: none; }
-.tag { font-size: 13px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
-.empty { padding: 40px 16px; text-align: center; color: var(--muted); }
-.more { display: flex; justify-content: center; padding: 12px; }
-.error { color: var(--danger); margin: 0 4px 12px; }
-.error:empty { display: none; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); padding: 20px; width: min(420px, calc(100vw - 32px)); }
-dialog::backdrop { background: rgb(0 0 0 / .4); }
-dialog form { display: grid; gap: 12px; }
-dialog h2 { margin: 0 0 4px; font-size: 18px; }
-.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-/* Phone: each row becomes two lines — what and how much, then when / who / category. */
-@media (max-width: 640px) {
-  thead { display: none; }
-  table, tbody { display: block; }
-  tbody tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  tbody tr:last-child { border-bottom: none; }
-  tbody td { display: block; padding: 0; border: none; }
-  td.comment { order: 1; flex: 1 1 60%; min-width: 0; font-weight: 500; }
-  td.amount { order: 2; font-weight: 600; }
-  td.date { order: 3; font-size: 13px; color: var(--muted); }
-  td.user { order: 4; font-size: 13px; color: var(--muted); }
-  td.cat { order: 5; }
-  td.row-actions { order: 6; margin-left: auto; }
-}
-</style>
+<meta name="color-scheme" content="light dark">
+<title>Spendly — семейный бюджет</title>
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+<script>
+  // Apply the saved theme before the first paint so the page doesn't flash.
+  try { const t = localStorage.getItem('spendly-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+</script>
+<script type="module" src="app.js"></script>
 </head>
-<body>
-<main>
-  <header>
-    <div><h1>Spendly</h1><p>Расходы семьи</p></div>
-    <button class="primary" id="add">Добавить трату</button>
-  </header>
-
-  <section class="card filters" aria-label="Фильтры">
-    <div class="presets" role="group" aria-label="Период">
-      <button data-preset="today" aria-pressed="false">Сегодня</button>
-      <button data-preset="week" aria-pressed="false">7 дней</button>
-      <button data-preset="month" aria-pressed="false">Этот месяц</button>
-      <button data-preset="prev" aria-pressed="false">Прошлый месяц</button>
-      <button data-preset="all" aria-pressed="true">Всё время</button>
+<body class="booting">
+<header class="topbar">
+  <div class="container topbar-inner">
+    <a class="brand" href="/" aria-label="Spendly — на главную">
+      <img src="logo.svg" alt="" width="32" height="32">
+      <span class="brand-name">Spendly</span>
+      <span class="brand-sub">семейный бюджет</span>
+    </a>
+    <div class="topbar-actions">
+      <a class="ghost icon-btn" href="/docs" target="_blank" rel="noopener" aria-label="Документация API" title="Документация API">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg>
+      </a>
+      <button class="ghost icon-btn" id="theme" type="button" aria-label="Тема оформления"></button>
+      <button class="primary" id="add" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Добавить</span><kbd>N</kbd>
+      </button>
     </div>
-    <label>Участник <select id="f-user"><option value="">Все</option></select></label>
-    <label>С <input type="date" id="f-from"></label>
-    <label>По <input type="date" id="f-to"></label>
-    <label>Категория <select id="f-category"><option value="">Все</option></select></label>
-    <label>Поиск <input type="search" id="f-text" placeholder="такси"></label>
-    <button id="reset">Сбросить</button>
+  </div>
+</header>
+
+<main class="container">
+  <section class="toolbar reveal" style="--i:0" aria-label="Фильтры">
+    <div class="segmented" role="group" aria-label="Период">
+      <button type="button" data-preset="today" aria-pressed="false">Сегодня</button>
+      <button type="button" data-preset="week" aria-pressed="false">7 дней</button>
+      <button type="button" data-preset="month" aria-pressed="false">Этот месяц</button>
+      <button type="button" data-preset="prev" aria-pressed="false">Прошлый месяц</button>
+      <button type="button" data-preset="all" aria-pressed="true">Всё время</button>
+    </div>
+    <button class="ghost filters-toggle" id="filters-toggle" type="button" aria-expanded="false" aria-controls="filters">Фильтры</button>
+    <div class="filters" id="filters">
+      <label class="field"><span>Участник</span><select id="f-user"><option value="">Все</option></select></label>
+      <label class="field"><span>С</span><input type="date" id="f-from"></label>
+      <label class="field"><span>По</span><input type="date" id="f-to"></label>
+      <label class="field"><span>Категория</span><select id="f-category"><option value="">Все</option></select></label>
+      <label class="field search"><span>Поиск</span><input type="search" id="f-text" placeholder="такси, кофе…" autocomplete="off"></label>
+      <button class="ghost reset" id="reset" type="button" hidden>Сбросить</button>
+    </div>
   </section>
 
-  <p class="error" id="error" role="alert"></p>
-  <div class="summary" id="summary" aria-live="polite"></div>
+  <section class="kpis reveal" style="--i:1" aria-label="Итоги">
+    <article class="card kpi">
+      <p class="kpi-label">Потрачено</p>
+      <p class="kpi-value" id="kpi-total"><span class="sk" style="width:70%"></span></p>
+      <p class="kpi-sub" id="kpi-period">за всё время</p>
+    </article>
+    <article class="card kpi">
+      <p class="kpi-label">Трат</p>
+      <p class="kpi-value" id="kpi-count"><span class="sk" style="width:35%"></span></p>
+      <p class="kpi-sub" id="kpi-members">&nbsp;</p>
+    </article>
+    <article class="card kpi">
+      <p class="kpi-label">Средний чек</p>
+      <p class="kpi-value" id="kpi-avg"><span class="sk" style="width:55%"></span></p>
+      <p class="kpi-sub">на одну трату</p>
+    </article>
+    <article class="card kpi">
+      <p class="kpi-label">Больше всего</p>
+      <p class="kpi-value kpi-top" id="kpi-top"><span class="sk" style="width:60%"></span></p>
+      <p class="kpi-sub" id="kpi-top-sub">&nbsp;</p>
+    </article>
+  </section>
 
-  <section class="card">
-    <div class="table-wrap"><table>
-      <thead><tr><th>Дата</th><th>Участник</th><th>Категория</th><th class="amount">Сумма</th><th>Комментарий</th><th><span class="visually-hidden">Действия</span></th></tr></thead>
-      <tbody id="rows"></tbody>
-    </table></div>
-    <div class="empty" id="empty" hidden></div>
-    <div class="more" id="more" hidden><button id="more-btn">Показать ещё</button></div>
+  <section class="breakdowns reveal" style="--i:2">
+    <article class="card panel">
+      <header class="panel-head"><h2>По категориям</h2><span class="hint">нажмите, чтобы отфильтровать</span></header>
+      <div class="bars" id="by-category"><span class="sk bar-sk"></span><span class="sk bar-sk"></span><span class="sk bar-sk"></span></div>
+    </article>
+    <article class="card panel">
+      <header class="panel-head"><h2>По участникам</h2></header>
+      <div class="bars" id="by-user"><span class="sk bar-sk"></span><span class="sk bar-sk"></span></div>
+    </article>
+  </section>
+
+  <section class="card panel list reveal" style="--i:3" aria-labelledby="list-title">
+    <header class="panel-head"><h2 id="list-title">Траты</h2><span class="hint" id="list-count"></span></header>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Участник</th><th>Категория</th><th>Комментарий</th><th class="num">Сумма</th><th><span class="sr-only">Действия</span></th></tr></thead>
+        <tbody id="rows">
+          <tr class="sk-row"><td colspan="5"><span class="sk"></span></td></tr>
+          <tr class="sk-row"><td colspan="5"><span class="sk"></span></td></tr>
+          <tr class="sk-row"><td colspan="5"><span class="sk"></span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect x="11" y="13" width="42" height="31" rx="10" fill="var(--surface-2)" stroke="var(--line)"/>
+        <path d="M17 38 L16 52 L30 42 Z" fill="var(--surface-2)"/>
+        <rect x="19" y="20.5" width="25" height="5" rx="2.5" fill="var(--track)"/>
+        <rect x="19" y="28" width="17" height="5" rx="2.5" fill="var(--track)"/>
+        <rect x="19" y="35.5" width="9" height="5" rx="2.5" fill="var(--track)"/>
+      </svg>
+      <p class="empty-title" id="empty-title"></p>
+      <p class="empty-text" id="empty-text"></p>
+      <button class="ghost" id="empty-action" type="button"></button>
+    </div>
+    <div class="more" id="more" hidden><button class="ghost" id="more-btn" type="button">Показать ещё</button></div>
   </section>
 </main>
 
 <dialog id="dialog" aria-labelledby="form-title">
   <form id="form">
-    <h2 id="form-title">Новая трата</h2>
-    <label>Участник <select name="user_id" required></select></label>
-    <label>Сумма, ₽ <input name="amount" inputmode="decimal" required placeholder="350"></label>
-    <label>Категория <select name="category" required></select></label>
-    <label>Дата <input name="spent_at" type="date" required></label>
-    <label>Комментарий <input name="comment" maxlength="500" placeholder="кофе"></label>
-    <p class="error" id="form-error" role="alert"></p>
-    <div class="actions">
-      <button type="button" id="cancel">Отмена</button>
-      <button class="primary" type="submit">Сохранить</button>
+    <header class="dialog-head">
+      <h2 id="form-title">Новая трата</h2>
+      <button type="button" class="ghost icon-btn" id="close-x" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <label class="field amount"><span>Сумма, ₽</span><input name="amount" inputmode="decimal" required placeholder="0" autocomplete="off"></label>
+    <fieldset class="field cat-picker">
+      <legend>Категория</legend>
+      <div class="chips" id="cat-chips"></div>
+    </fieldset>
+    <div class="grid2">
+      <label class="field"><span>Участник</span><select name="user_id" required></select></label>
+      <label class="field"><span>Дата</span><input name="spent_at" type="date" required></label>
     </div>
+    <label class="field"><span>Комментарий</span><input name="comment" maxlength="500" placeholder="кофе" autocomplete="off"></label>
+    <p class="form-error" id="form-error" role="alert"></p>
+    <footer class="dialog-foot">
+      <button type="button" class="ghost" id="cancel">Отмена</button>
+      <button class="primary" type="submit" id="save">Сохранить</button>
+    </footer>
   </form>
 </dialog>
 
-<script>
-const PAGE = 50;
-const FILTERS = [['user_id', 'f-user'], ['from', 'f-from'], ['to', 'f-to'], ['category', 'f-category'], ['text', 'f-text']];
-const $ = (id) => document.getElementById(id);
-const rub = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 });
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtDate = (d) => d.split('-').reverse().join('.');
-const iso = (d) => d.toLocaleDateString('sv-SE'); // YYYY-MM-DD в поясе браузера
-const today = () => iso(new Date());
-
-// Те же периоды, что понимает бот: 7 дней включая сегодня, месяц — с 1-го числа.
-const PRESETS = {
-  today: () => [today(), today()],
-  week: () => { const d = new Date(); d.setDate(d.getDate() - 6); return [iso(d), today()]; },
-  month: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth(), 1)), today()]; },
-  prev: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)), iso(new Date(d.getFullYear(), d.getMonth(), 0))]; },
-  all: () => ['', ''],
-};
-
-function pressPreset(name) {
-  for (const b of document.querySelectorAll('[data-preset]')) b.setAttribute('aria-pressed', String(b.dataset.preset === name));
-}
-
-let items = [], users = [], editing = null;
-
-async function api(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (res.status === 204) return null;
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
-  return data;
-}
-
-async function load(append = false) {
-  $('error').textContent = '';
-  const params = new URLSearchParams({ limit: PAGE, offset: append ? items.length : 0 });
-  for (const [key, id] of FILTERS) if ($(id).value) params.set(key, $(id).value);
-  try {
-    const data = await api('GET', '/api/expenses?' + params);
-    items = append ? items.concat(data.items) : data.items;
-    render(data.summary);
-  } catch (e) { $('error').textContent = e.message; }
-}
-
-function render(summary) {
-  $('rows').innerHTML = items.map((e) => `
-    <tr>
-      <td class="date">${fmtDate(e.spent_at)}</td>
-      <td class="user">${esc(e.user_name)}</td>
-      <td class="cat"><span class="tag">${esc(e.category)}</span></td>
-      <td class="amount">${rub.format(e.amount)}</td>
-      <td class="comment">${esc(e.comment)}</td>
-      <td class="row-actions"><button class="link" data-edit="${e.id}" aria-label="Изменить: ${esc(label(e))}">Изменить</button><button class="link danger" data-delete="${e.id}" aria-label="Удалить: ${esc(label(e))}">Удалить</button></td>
-    </tr>`).join('');
-  $('empty').hidden = items.length > 0;
-  $('empty').textContent = FILTERS.some(([, id]) => $(id).value)
-    ? 'По этим фильтрам ничего не найдено.'
-    : 'Трат нет. Напишите боту «кофе 350» или добавьте трату здесь.';
-  $('more').hidden = items.length >= summary.count;
-  const cats = Object.entries(summary.by_category).sort((a, b) => b[1] - a[1])
-    .map(([c, m]) => `${esc(c)} ${rub.format(m)}`).join(' · ');
-  $('summary').innerHTML = `<span>Трат: <b>${summary.count}</b></span><span>Сумма: <b>${rub.format(summary.total)}</b></span>${cats ? `<span>${cats}</span>` : ''}`;
-}
-
-const label = (e) => `${e.comment || e.category}, ${rub.format(e.amount)}, ${fmtDate(e.spent_at)}`;
-
-function openForm(e) {
-  editing = e || null;
-  const f = $('form');
-  $('form-title').textContent = e ? 'Изменить трату' : 'Новая трата';
-  $('form-error').textContent = '';
-  f.user_id.value = e ? e.user_id : ($('f-user').value || users[0].id);
-  f.amount.value = e ? e.amount : '';
-  f.category.value = e ? e.category : 'еда';
-  f.spent_at.value = e ? e.spent_at : today();
-  f.spent_at.max = today();
-  f.comment.value = e ? e.comment : '';
-  $('dialog').showModal();
-  f.amount.focus();
-}
-
-$('form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const f = ev.target;
-  const body = {
-    user_id: Number(f.user_id.value), amount: f.amount.value, category: f.category.value,
-    spent_at: f.spent_at.value, comment: f.comment.value,
-  };
-  try {
-    if (editing) await api('PATCH', `/api/expenses/${editing.id}`, body);
-    else await api('POST', '/api/expenses', body);
-    $('dialog').close();
-    load();
-  } catch (e) { $('form-error').textContent = e.message; }
-});
-
-$('rows').addEventListener('click', async (ev) => {
-  const { edit, delete: del } = ev.target.dataset;
-  const e = items.find((x) => x.id === Number(edit || del));
-  if (!e) return;
-  if (edit) return openForm(e);
-  if (!confirm(`Удалить «${e.comment || e.category}» на ${rub.format(e.amount)}?`)) return;
-  try { await api('DELETE', `/api/expenses/${e.id}`); load(); } catch (err) { $('error').textContent = err.message; }
-});
-
-$('add').addEventListener('click', () => {
-  if (users.length) openForm();
-  else $('error').textContent = 'В семье пока нет участников: задайте FAMILY_MEMBERS или напишите боту.';
-});
-$('cancel').addEventListener('click', () => $('dialog').close());
-$('more-btn').addEventListener('click', () => load(true));
-$('reset').addEventListener('click', () => { for (const [, id] of FILTERS) $(id).value = ''; pressPreset('all'); load(); });
-for (const id of ['f-user', 'f-category']) $(id).addEventListener('change', () => load());
-for (const id of ['f-from', 'f-to']) $(id).addEventListener('change', () => { pressPreset(null); load(); });
-let searchTimer;
-$('f-text').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 300); });
-for (const b of document.querySelectorAll('[data-preset]')) {
-  b.addEventListener('click', () => {
-    [$('f-from').value, $('f-to').value] = PRESETS[b.dataset.preset]();
-    pressPreset(b.dataset.preset);
-    load();
-  });
-}
-
-(async () => {
-  try {
-    const [u, cats] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/categories')]);
-    users = u;
-    const userOpts = users.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
-    const catOpts = cats.map((c) => `<option>${esc(c)}</option>`).join('');
-    $('f-user').insertAdjacentHTML('beforeend', userOpts);
-    $('f-category').insertAdjacentHTML('beforeend', catOpts);
-    $('form').user_id.innerHTML = userOpts;
-    $('form').category.innerHTML = catOpts;
-  } catch (e) { $('error').textContent = e.message; }
-  load();
-})();
-</script>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 </body>
 </html>
